@@ -98,6 +98,9 @@ public:
 	static int SetCpuState(lua_State* lua);
 
 	static int GetAccessCounters(lua_State* lua);
+	static int GetAccessCountersRange(lua_State* lua);
+	static int GetAccessCounterRows(lua_State* lua);
+	static int GetAccessSummary(lua_State* lua);
 	static int ResetAccessCounters(lua_State* lua);
 
 	static int GetCdlData(lua_State* lua);

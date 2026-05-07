@@ -71,6 +71,21 @@ enum class AccessCounterType
 	LastExecClock
 };
 
+static uint64_t GetAccessCounterValue(AddressCounters& counter, AccessCounterType counterType)
+{
+	switch(counterType) {
+		default:
+		case AccessCounterType::ReadCount: return counter.ReadCounter;
+		case AccessCounterType::WriteCount: return counter.WriteCounter;
+		case AccessCounterType::ExecCount: return counter.ExecCounter;
+		case AccessCounterType::LastReadClock: return counter.ReadStamp;
+		case AccessCounterType::LastWriteClock: return counter.WriteStamp;
+		case AccessCounterType::LastExecClock: return counter.ExecStamp;
+	}
+}
+
+static constexpr uint32_t MaxLuaAccessCounterRows = 100000;
+
 void LuaApi::SetContext(ScriptingContext* context)
 {
 	_context = context;
@@ -142,6 +157,9 @@ int LuaApi::GetLibrary(lua_State* lua)
 		{ "setInput", LuaApi::SetInput },
 
 		{ "getAccessCounters", LuaApi::GetAccessCounters },
+		{ "getAccessCountersRange", LuaApi::GetAccessCountersRange },
+		{ "getAccessCounterRows", LuaApi::GetAccessCounterRows },
+		{ "getAccessSummary", LuaApi::GetAccessSummary },
 		{ "resetAccessCounters", LuaApi::ResetAccessCounters },
 
 		{ "getCdlData", LuaApi::GetCdlData },
@@ -930,24 +948,129 @@ int LuaApi::GetAccessCounters(lua_State* lua)
 	counts.resize(size, {});
 	_debugger->GetMemoryAccessCounter()->GetAccessCounts(0, size, memoryType, counts.data());
 
-	auto getValue = [&](AddressCounters& counter) -> uint64_t {
-		switch(counterType) {
-			default:
-			case AccessCounterType::ReadCount: return counter.ReadCounter;
-			case AccessCounterType::WriteCount: return counter.WriteCounter;
-			case AccessCounterType::ExecCount: return counter.ExecCounter;
-			case AccessCounterType::LastReadClock: return counter.ReadStamp;
-			case AccessCounterType::LastWriteClock: return counter.WriteStamp;
-			case AccessCounterType::LastExecClock: return counter.ExecStamp;
-		}
-	};
-
 	lua_newtable(lua);
 	for(uint32_t i = 0; i < size; i++) {
-		lua_pushinteger(lua, getValue(counts[i]));
+		lua_pushinteger(lua, GetAccessCounterValue(counts[i], counterType));
 		lua_rawseti(lua, -2, i);
 	}
 
+	return 1;
+}
+
+int LuaApi::GetAccessCountersRange(lua_State* lua)
+{
+	LuaCallHelper l(lua);
+	uint32_t length = l.ReadInteger();
+	uint32_t startAddress = l.ReadInteger();
+	MemoryType memoryType = (MemoryType)l.ReadInteger();
+	AccessCounterType counterType = (AccessCounterType)l.ReadInteger();
+	checkEnum(MemoryType, memoryType, "Invalid memory type");
+	checkEnum(AccessCounterType, counterType, "Invalid counter type");
+	checkparams();
+
+	uint32_t size = _memoryDumper->GetMemorySize(memoryType);
+	errorCond(startAddress > size, "Start address is outside the selected memory type");
+	errorCond(length > size - startAddress, "Requested range extends past the end of the selected memory type");
+
+	vector<AddressCounters> counts;
+	counts.resize(length, {});
+	_debugger->GetMemoryAccessCounter()->GetAccessCounts(startAddress, length, memoryType, counts.data());
+
+	lua_newtable(lua);
+	for(uint32_t i = 0; i < length; i++) {
+		lua_pushinteger(lua, GetAccessCounterValue(counts[i], counterType));
+		lua_rawseti(lua, -2, i);
+	}
+
+	return 1;
+}
+
+int LuaApi::GetAccessCounterRows(lua_State* lua)
+{
+	LuaCallHelper l(lua);
+	uint32_t length = l.ReadInteger();
+	uint32_t startAddress = l.ReadInteger();
+	MemoryType memoryType = (MemoryType)l.ReadInteger();
+	checkEnum(MemoryType, memoryType, "Invalid memory type");
+	checkparams();
+
+	uint32_t size = _memoryDumper->GetMemorySize(memoryType);
+	errorCond(length > MaxLuaAccessCounterRows, "Maximum access-counter row count is 100000");
+	errorCond(startAddress > size, "Start address is outside the selected memory type");
+	errorCond(length > size - startAddress, "Requested range extends past the end of the selected memory type");
+
+	vector<AddressCounters> counts;
+	counts.resize(length, {});
+	_debugger->GetMemoryAccessCounter()->GetAccessCounts(startAddress, length, memoryType, counts.data());
+
+	lua_newtable(lua);
+	for(uint32_t i = 0; i < length; i++) {
+		AddressCounters& counter = counts[i];
+		lua_newtable(lua);
+		lua_pushintvalue(address, startAddress + i);
+		lua_pushliteral(lua, "readCount"); lua_pushinteger(lua, counter.ReadCounter); lua_settable(lua, -3);
+		lua_pushliteral(lua, "writeCount"); lua_pushinteger(lua, counter.WriteCounter); lua_settable(lua, -3);
+		lua_pushliteral(lua, "execCount"); lua_pushinteger(lua, counter.ExecCounter); lua_settable(lua, -3);
+		lua_pushliteral(lua, "lastReadClock"); lua_pushinteger(lua, counter.ReadStamp); lua_settable(lua, -3);
+		lua_pushliteral(lua, "lastWriteClock"); lua_pushinteger(lua, counter.WriteStamp); lua_settable(lua, -3);
+		lua_pushliteral(lua, "lastExecClock"); lua_pushinteger(lua, counter.ExecStamp); lua_settable(lua, -3);
+		lua_rawseti(lua, -2, i + 1);
+	}
+
+	return 1;
+}
+
+int LuaApi::GetAccessSummary(lua_State* lua)
+{
+	LuaCallHelper l(lua);
+	uint32_t length = l.ReadInteger();
+	uint32_t startAddress = l.ReadInteger();
+	MemoryType memoryType = (MemoryType)l.ReadInteger();
+	checkEnum(MemoryType, memoryType, "Invalid memory type");
+	checkparams();
+
+	uint32_t size = _memoryDumper->GetMemorySize(memoryType);
+	errorCond(startAddress > size, "Start address is outside the selected memory type");
+	errorCond(length > size - startAddress, "Requested range extends past the end of the selected memory type");
+
+	vector<AddressCounters> counts;
+	counts.resize(length, {});
+	_debugger->GetMemoryAccessCounter()->GetAccessCounts(startAddress, length, memoryType, counts.data());
+
+	uint32_t readBytes = 0;
+	uint32_t writeBytes = 0;
+	uint32_t execBytes = 0;
+	uint64_t readCount = 0;
+	uint64_t writeCount = 0;
+	uint64_t execCount = 0;
+	uint64_t lastReadClock = 0;
+	uint64_t lastWriteClock = 0;
+	uint64_t lastExecClock = 0;
+
+	for(AddressCounters& counter : counts) {
+		if(counter.ReadCounter) { readBytes++; }
+		if(counter.WriteCounter) { writeBytes++; }
+		if(counter.ExecCounter) { execBytes++; }
+		readCount += counter.ReadCounter;
+		writeCount += counter.WriteCounter;
+		execCount += counter.ExecCounter;
+		lastReadClock = std::max(lastReadClock, counter.ReadStamp);
+		lastWriteClock = std::max(lastWriteClock, counter.WriteStamp);
+		lastExecClock = std::max(lastExecClock, counter.ExecStamp);
+	}
+
+	lua_newtable(lua);
+	lua_pushintvalue(startAddress, startAddress);
+	lua_pushintvalue(length, length);
+	lua_pushintvalue(readBytes, readBytes);
+	lua_pushintvalue(writeBytes, writeBytes);
+	lua_pushintvalue(execBytes, execBytes);
+	lua_pushliteral(lua, "readCount"); lua_pushinteger(lua, readCount); lua_settable(lua, -3);
+	lua_pushliteral(lua, "writeCount"); lua_pushinteger(lua, writeCount); lua_settable(lua, -3);
+	lua_pushliteral(lua, "execCount"); lua_pushinteger(lua, execCount); lua_settable(lua, -3);
+	lua_pushliteral(lua, "lastReadClock"); lua_pushinteger(lua, lastReadClock); lua_settable(lua, -3);
+	lua_pushliteral(lua, "lastWriteClock"); lua_pushinteger(lua, lastWriteClock); lua_settable(lua, -3);
+	lua_pushliteral(lua, "lastExecClock"); lua_pushinteger(lua, lastExecClock); lua_settable(lua, -3);
 	return 1;
 }
 
