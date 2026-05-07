@@ -191,6 +191,60 @@
 	"returnValue": { "type": "Array", "description": "Array of bytes" }
 },
 {
+	"name": "getCdlDataRange",
+	"category": "Miscellaneous",
+	"subcategory": "Cdl",
+	"description": "Returns the CDL bytes for a sub-range of the specified memory type. Indexed by offset from startAddress (0-based), matching getCdlData.",
+	"parameters": [
+		{ "name": "memoryType", "type": "Enum", "enumName": "memType", "description": "Memory type" },
+		{ "name": "startAddress", "type": "Int", "description": "Start address of the range" },
+		{ "name": "length", "type": "Int", "description": "Number of bytes to read" }
+	],
+	"returnValue": { "type": "Array", "description": "Array of bytes" }
+},
+{
+	"name": "getCdlRows",
+	"category": "Miscellaneous",
+	"subcategory": "Cdl",
+	"description": "Returns a 1-indexed array of tables describing per-address CDL state over a sub-range. Each row contains \"address\", the raw \"cdl\" byte, and the decoded flag bits as booleans (\"code\", \"data\", \"jumpTarget\", \"subEntryPoint\"). The row count is capped at 100000.\n\nNote: CDL state is a runtime-derived snapshot. Flags only appear after the corresponding code has actually executed under the running session, so CDL evidence is not authoritative until a representative run has happened.",
+	"parameters": [
+		{ "name": "memoryType", "type": "Enum", "enumName": "memType", "description": "Memory type" },
+		{ "name": "startAddress", "type": "Int", "description": "Start address of the range" },
+		{ "name": "length", "type": "Int", "description": "Number of bytes to read" }
+	],
+	"returnValue": { "type": "Array", "description": "Array of tables" }
+},
+{
+	"name": "getCdlSummary",
+	"category": "Miscellaneous",
+	"subcategory": "Cdl",
+	"description": "Returns aggregate CDL statistics for the specified memory type: codeBytes, dataBytes, totalBytes, jumpTargetCount, functionCount, drawnChrBytes and totalChrBytes.",
+	"parameters": [
+		{ "name": "memoryType", "type": "Enum", "enumName": "memType", "description": "Memory type" }
+	],
+	"returnValue": { "type": "Table", "description": "CDL statistics" }
+},
+{
+	"name": "getCdlFunctions",
+	"category": "Miscellaneous",
+	"subcategory": "Cdl",
+	"description": "Returns the function entry-point addresses recorded by the CDL for the specified memory type. The result count is capped at 100000.\n\nNote: function entries are derived from observed executions; they are not authoritative until the relevant code has run.",
+	"parameters": [
+		{ "name": "memoryType", "type": "Enum", "enumName": "memType", "description": "Memory type" },
+		{ "name": "maxResultCount", "type": "Int", "description": "Maximum number of entries to return", "defaultValue": "100000" }
+	],
+	"returnValue": { "type": "Array", "description": "Array of addresses" }
+},
+{
+	"name": "resetCdl",
+	"category": "Miscellaneous",
+	"subcategory": "Cdl",
+	"description": "Clears the CDL (code/data log) state for the specified memory type.",
+	"parameters": [
+		{ "name": "memoryType", "type": "Enum", "enumName": "memType", "description": "Memory type" }
+	]
+},
+{
 	"name": "getCpuState",
 	"category": "Emulation",
 	"description": "Returns a table containing key-value pairs that describe the CPU's current state.\n\nNote: The name of the values returned may change from one version to another. Some values may represent the emulator's internal state and may not be useful (these will be hidden in future versions.)",
