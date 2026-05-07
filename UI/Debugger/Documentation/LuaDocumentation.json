@@ -245,6 +245,61 @@
 	]
 },
 {
+	"name": "getTraceRows",
+	"category": "Miscellaneous",
+	"subcategory": "Trace",
+	"description": "Returns a 1-indexed array of tables describing rows from the in-memory execution trace, starting at startOffset (0 = most recent). Each row contains \"rowId\" (a stable identifier across the trace), \"programCounter\", \"cpuType\", \"byteCodeSize\", \"logSize\", a \"timing\" sub-table (frameCount, scanline, cycle, hClock, cycleCount), the formatted \"log\" string, and a \"byteCode\" array. The row count is capped at 100000.\n\nNote: only rows whose CPU has trace logging currently enabled (via setTraceOptions) are returned. Disabled CPUs contribute no rows even if their ring buffer still holds data.",
+	"parameters": [
+		{ "name": "startOffset", "type": "Int", "description": "Offset into the trace (0 = most recent row)" },
+		{ "name": "maxRowCount", "type": "Int", "description": "Maximum number of rows to return" }
+	],
+	"returnValue": { "type": "Array", "description": "Array of trace row tables" }
+},
+{
+	"name": "getTraceSize",
+	"category": "Miscellaneous",
+	"subcategory": "Trace",
+	"description": "Returns the number of rows currently visible to getTraceRows for the active set of trace loggers.\n\nNote: this counts rows from CPUs whose trace logging is currently enabled. Disabling tracing makes the count fall to zero even when the ring buffer still holds data.",
+	"returnValue": { "type": "Int", "description": "Trace row count" }
+},
+{
+	"name": "clearTrace",
+	"category": "Miscellaneous",
+	"subcategory": "Trace",
+	"description": "Clears the in-memory execution trace."
+},
+{
+	"name": "setTraceOptions",
+	"category": "Miscellaneous",
+	"subcategory": "Trace",
+	"description": "Configures the trace logger for the specified CPU type. The options table accepts \"enabled\" (bool), \"indentCode\" (bool), \"useLabels\" (bool), \"condition\" (string) and \"format\" (string). Strings are limited to 999 characters and cannot contain embedded null bytes.\n\nFields omitted from the table keep their current value, so emu.setTraceOptions({ enabled = true }) only flips the enabled flag and leaves the other fields alone.",
+	"parameters": [
+		{ "name": "options", "type": "Table", "description": "Trace logger options" },
+		{ "name": "cpuType", "type": "Enum", "enumName": "cpuType", "description": "CPU type", "defaultValue": "main CPU" }
+	]
+},
+{
+	"name": "startTraceLoggerFile",
+	"category": "Miscellaneous",
+	"subcategory": "Trace",
+	"description": "Opens the given file and starts streaming the trace log to it. Any open file is closed first. Requires the script's I/O access setting to be enabled.",
+	"parameters": [
+		{ "name": "filename", "type": "String", "description": "Path of the file to write the trace log to" }
+	]
+},
+{
+	"name": "flushTraceLoggerFile",
+	"category": "Miscellaneous",
+	"subcategory": "Trace",
+	"description": "Flushes the buffered trace log to disk without closing the file."
+},
+{
+	"name": "stopTraceLoggerFile",
+	"category": "Miscellaneous",
+	"subcategory": "Trace",
+	"description": "Flushes any buffered output and closes the trace log file. Safe to call when no file is open."
+},
+{
 	"name": "getCpuState",
 	"category": "Emulation",
 	"description": "Returns a table containing key-value pairs that describe the CPU's current state.\n\nNote: The name of the values returned may change from one version to another. Some values may represent the emulator's internal state and may not be useful (these will be hidden in future versions.)",

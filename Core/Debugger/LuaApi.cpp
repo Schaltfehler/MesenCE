@@ -7,6 +7,8 @@
 #include "Debugger/MemoryDumper.h"
 #include "Debugger/ScriptingContext.h"
 #include "Debugger/MemoryAccessCounter.h"
+#include "Debugger/ITraceLogger.h"
+#include "Debugger/TraceLogFileSaver.h"
 #include "Debugger/CdlManager.h"
 #include "Debugger/LabelManager.h"
 #include "Shared/SystemActionManager.h"
@@ -84,6 +86,7 @@ static uint64_t GetAccessCounterValue(AddressCounters& counter, AccessCounterTyp
 	}
 }
 
+static constexpr uint32_t MaxLuaTraceRows = 100000;
 static constexpr uint32_t MaxLuaAccessCounterRows = 100000;
 static constexpr uint32_t MaxLuaCdlRows = 100000;
 static constexpr uint32_t MaxLuaCdlFunctions = 100000;
@@ -170,6 +173,14 @@ int LuaApi::GetLibrary(lua_State* lua)
 		{ "getCdlSummary", LuaApi::GetCdlSummary },
 		{ "getCdlFunctions", LuaApi::GetCdlFunctions },
 		{ "resetCdl", LuaApi::ResetCdl },
+
+		{ "getTraceRows", LuaApi::GetTraceRows },
+		{ "getTraceSize", LuaApi::GetTraceSize },
+		{ "clearTrace", LuaApi::ClearTrace },
+		{ "setTraceOptions", LuaApi::SetTraceOptions },
+		{ "startTraceLoggerFile", LuaApi::StartTraceLoggerFile },
+		{ "flushTraceLoggerFile", LuaApi::FlushTraceLoggerFile },
+		{ "stopTraceLoggerFile", LuaApi::StopTraceLoggerFile },
 
 		{ "addCheat", LuaApi::AddCheat },
 		{ "clearCheats", LuaApi::ClearCheats },
@@ -1243,6 +1254,154 @@ int LuaApi::ResetCdl(lua_State* lua)
 	}
 
 	_debugger->GetCdlManager()->ResetCdl(memoryType);
+	return l.ReturnCount();
+}
+
+int LuaApi::GetTraceRows(lua_State* lua)
+{
+	LuaCallHelper l(lua);
+	uint32_t maxRowCount = l.ReadInteger();
+	uint32_t startOffset = l.ReadInteger();
+	checkparams();
+	errorCond(maxRowCount > MaxLuaTraceRows, "Maximum trace row count is 100000");
+
+	vector<TraceRow> rows;
+	rows.resize(maxRowCount, {});
+	uint32_t rowCount = maxRowCount > 0 ? _debugger->GetExecutionTrace(rows.data(), startOffset, maxRowCount) : 0;
+
+	lua_newtable(lua);
+	for(uint32_t i = 0; i < rowCount; i++) {
+		TraceRow& row = rows[i];
+		lua_newtable(lua);
+		lua_pushliteral(lua, "rowId"); lua_pushinteger(lua, row.RowId); lua_settable(lua, -3);
+		lua_pushintvalue(programCounter, row.ProgramCounter);
+		lua_pushintvalue(cpuType, (int)row.Type);
+		lua_pushintvalue(byteCodeSize, row.ByteCodeSize);
+		lua_pushintvalue(logSize, row.LogSize);
+
+		lua_pushliteral(lua, "timing");
+		lua_newtable(lua);
+		//Use full lua_pushinteger for frameCount and cycleCount; lua_pushintvalue casts to int.
+		lua_pushliteral(lua, "frameCount"); lua_pushinteger(lua, row.FrameCount); lua_settable(lua, -3);
+		lua_pushintvalue(scanline, row.Scanline);
+		lua_pushintvalue(cycle, row.Cycle);
+		lua_pushintvalue(hClock, row.HClock);
+		lua_pushliteral(lua, "cycleCount"); lua_pushinteger(lua, row.CycleCount); lua_settable(lua, -3);
+		lua_settable(lua, -3);
+
+		lua_pushliteral(lua, "log");
+		lua_pushlstring(lua, row.LogOutput, strnlen(row.LogOutput, sizeof(row.LogOutput)));
+		lua_settable(lua, -3);
+
+		lua_pushliteral(lua, "byteCode");
+		lua_newtable(lua);
+		for(uint32_t j = 0; j < row.ByteCodeSize && j < sizeof(row.ByteCode); j++) {
+			lua_pushinteger(lua, row.ByteCode[j]);
+			lua_rawseti(lua, -2, j + 1);
+		}
+		lua_settable(lua, -3);
+
+		lua_rawseti(lua, -2, i + 1);
+	}
+
+	return 1;
+}
+
+int LuaApi::GetTraceSize(lua_State* lua)
+{
+	LuaCallHelper l(lua);
+	checkparams();
+	l.Return(_debugger->GetExecutionTrace(nullptr, 0, UINT32_MAX));
+	return l.ReturnCount();
+}
+
+int LuaApi::ClearTrace(lua_State* lua)
+{
+	LuaCallHelper l(lua);
+	checkparams();
+	_debugger->ClearExecutionTrace();
+	return l.ReturnCount();
+}
+
+int LuaApi::SetTraceOptions(lua_State* lua)
+{
+	int paramCount = lua_gettop(lua);
+	errorCond(paramCount != 1 && paramCount != 2, "setTraceOptions expects an options table and an optional CPU type");
+
+	CpuType cpuType = paramCount == 2 ? (CpuType)luaL_checkinteger(lua, 2) : _context->GetDefaultCpuType();
+	checkEnum(CpuType, cpuType, "invalid cpu type");
+
+	luaL_checktype(lua, 1, LUA_TTABLE);
+	lua_settop(lua, 1);
+
+	ITraceLogger* logger = _debugger->GetTraceLogger(cpuType);
+	errorCond(!logger, "This CPU type does not support trace logging");
+
+	//Start from current options so a partial table doesn't clear the rest.
+	TraceLoggerOptions options = logger->GetOptions();
+
+	lua_getfield(lua, -1, "enabled");
+	if(!lua_isnil(lua, -1)) { options.Enabled = lua_toboolean(lua, -1) != 0; }
+	lua_pop(lua, 1);
+	lua_getfield(lua, -1, "indentCode");
+	if(!lua_isnil(lua, -1)) { options.IndentCode = lua_toboolean(lua, -1) != 0; }
+	lua_pop(lua, 1);
+	lua_getfield(lua, -1, "useLabels");
+	if(!lua_isnil(lua, -1)) { options.UseLabels = lua_toboolean(lua, -1) != 0; }
+	lua_pop(lua, 1);
+
+	lua_getfield(lua, -1, "condition");
+	if(!lua_isnil(lua, -1)) {
+		luaL_checktype(lua, -1, LUA_TSTRING);
+		size_t len;
+		const char* value = lua_tolstring(lua, -1, &len);
+		errorCond(len >= sizeof(options.Condition), "Trace condition is too long");
+		errorCond(memchr(value, '\0', len) != nullptr, "Trace condition contains an embedded null byte");
+		memcpy(options.Condition, value, len);
+		options.Condition[len] = '\0';
+	}
+	lua_pop(lua, 1);
+
+	lua_getfield(lua, -1, "format");
+	if(!lua_isnil(lua, -1)) {
+		luaL_checktype(lua, -1, LUA_TSTRING);
+		size_t len;
+		const char* value = lua_tolstring(lua, -1, &len);
+		errorCond(len >= sizeof(options.Format), "Trace format string is too long");
+		errorCond(memchr(value, '\0', len) != nullptr, "Trace format string contains an embedded null byte");
+		memcpy(options.Format, value, len);
+		options.Format[len] = '\0';
+	}
+	lua_pop(lua, 1);
+
+	logger->SetOptions(options);
+	return 0;
+}
+
+int LuaApi::StartTraceLoggerFile(lua_State* lua)
+{
+	LuaCallHelper l(lua);
+	string filename = l.ReadString();
+	checkparams();
+	errorCond(!_emu->GetSettings()->GetDebugConfig().ScriptAllowIoOsAccess, "Trace file logging requires Lua I/O access to be enabled");
+	errorCond(filename.empty(), "Trace log filename cannot be empty");
+	errorCond(!_debugger->GetTraceLogFileSaver()->StartLogging(filename), "Could not open trace log file for writing");
+	return l.ReturnCount();
+}
+
+int LuaApi::FlushTraceLoggerFile(lua_State* lua)
+{
+	LuaCallHelper l(lua);
+	checkparams();
+	_debugger->GetTraceLogFileSaver()->Flush();
+	return l.ReturnCount();
+}
+
+int LuaApi::StopTraceLoggerFile(lua_State* lua)
+{
+	LuaCallHelper l(lua);
+	checkparams();
+	_debugger->GetTraceLogFileSaver()->StopLogging();
 	return l.ReturnCount();
 }
 

@@ -478,6 +478,11 @@ public:
 		}
 	}
 
+	TraceLoggerOptions GetOptions() override
+	{
+		return _options;
+	}
+
 	void SetOptions(TraceLoggerOptions options) override
 	{
 		DebugBreakHelper helper(_debugger);
@@ -533,10 +538,16 @@ public:
 		logOutput.reserve(300);
 		((TraceLoggerType*)this)->GetTraceRow(logOutput, state, _ppuState[index], _disassemblyCache[index]);
 
+		row.RowId = _rowIds[index];
 		row.Type = _cpuType;
 		_disassemblyCache[index].GetByteCode(row.ByteCode);
 		row.ByteCodeSize = _disassemblyCache[index].GetOpSize();
 		row.ProgramCounter = ((TraceLoggerType*)this)->GetProgramCounter(state);
+		row.Cycle = _ppuState[index].Cycle;
+		row.HClock = _ppuState[index].HClock;
+		row.Scanline = _ppuState[index].Scanline;
+		row.FrameCount = _ppuState[index].FrameCount;
+		row.CycleCount = (uint64_t)((TraceLoggerType*)this)->GetCycleCount(state);
 		row.LogSize = std::min<uint32_t>(499, (uint32_t)logOutput.size());
 		memcpy(row.LogOutput, logOutput.c_str(), row.LogSize);
 		row.LogOutput[row.LogSize] = 0;
