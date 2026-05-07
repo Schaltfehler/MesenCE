@@ -164,8 +164,14 @@ extern "C"
 
 	DllExport void __stdcall GetProfilerData(CpuType cpuType, ProfiledFunction* profilerData, uint32_t& functionCount)
 	{
+		uint32_t maxFunctionCount = functionCount;
 		functionCount = 0;
-		WithToolVoid(GetCallstackManager(cpuType), GetProfiler()->GetProfilerData(profilerData, functionCount));
+		WrapDebuggerCall<void>([&](Debugger* dbg) -> void {
+			if(CallstackManager* manager = dbg->GetCallstackManager(cpuType)) {
+				functionCount = maxFunctionCount;
+				manager->GetProfiler()->GetProfilerData(profilerData, functionCount);
+			}
+		});
 	}
 
 	DllExport void __stdcall ResetProfiler(CpuType cpuType)

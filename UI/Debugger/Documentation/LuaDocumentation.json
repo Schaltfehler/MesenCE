@@ -300,6 +300,57 @@
 	"description": "Flushes any buffered output and closes the trace log file. Safe to call when no file is open."
 },
 {
+	"name": "getDebuggerFeatures",
+	"category": "Miscellaneous",
+	"subcategory": "Debugger",
+	"description": "Returns a table describing which debugger features the specified CPU exposes (runToIrq, runToNmi, stepOver, stepOut, stepBack, changeProgramCounter, callStack, cpuCycleStep), the IRQ vector offset, and the CPU vector table (each entry has a name, address, and type).",
+	"parameters": [
+		{ "name": "cpuType", "type": "Enum", "enumName": "cpuType", "description": "CPU type" }
+	],
+	"returnValue": { "type": "Table", "description": "Debugger feature flags and CPU vector table" }
+},
+{
+	"name": "getInstructionProgress",
+	"category": "Miscellaneous",
+	"subcategory": "Debugger",
+	"description": "Returns the in-progress state of the current CPU instruction: startCycle, currentCycle, lastOpCode, and a lastMemoryOperation table (address, value, operationType, memoryType). Errors if the CPU type does not expose instruction progress.",
+	"parameters": [
+		{ "name": "cpuType", "type": "Enum", "enumName": "cpuType", "description": "CPU type" }
+	],
+	"returnValue": { "type": "Table", "description": "Instruction progress" }
+},
+{
+	"name": "getCallstack",
+	"category": "Miscellaneous",
+	"subcategory": "Debugger",
+	"description": "Returns a 1-indexed array of tables describing the current callstack for the specified CPU. Each frame contains the relative source/target/return addresses, the corresponding absolute addresses, the return stack pointer, and the frame flags. The frame count is capped at 512.\n\nNote: the callstack is reconstructed from observed JSR/JSL and RTS/RTL pairs and can desync on irregular control flow such as manual stack manipulation or IRQ handlers that do not unwind cleanly.",
+	"parameters": [
+		{ "name": "cpuType", "type": "Enum", "enumName": "cpuType", "description": "CPU type" },
+		{ "name": "maxFrameCount", "type": "Int", "description": "Maximum number of frames to return", "defaultValue": "512" }
+	],
+	"returnValue": { "type": "Array", "description": "Array of stack frame tables" }
+},
+{
+	"name": "getProfilerData",
+	"category": "Miscellaneous",
+	"subcategory": "Debugger",
+	"description": "Returns a 1-indexed array of profiler entries for the specified CPU. Each entry contains the function address, exclusiveCycles, inclusiveCycles, callCount, minCycles, maxCycles, averageCycles, and flags. The entry count is capped at 100000.",
+	"parameters": [
+		{ "name": "cpuType", "type": "Enum", "enumName": "cpuType", "description": "CPU type" },
+		{ "name": "maxFunctionCount", "type": "Int", "description": "Maximum number of entries to return", "defaultValue": "100000" }
+	],
+	"returnValue": { "type": "Array", "description": "Array of profiler entries" }
+},
+{
+	"name": "resetProfiler",
+	"category": "Miscellaneous",
+	"subcategory": "Debugger",
+	"description": "Clears the profiler data for the specified CPU.",
+	"parameters": [
+		{ "name": "cpuType", "type": "Enum", "enumName": "cpuType", "description": "CPU type" }
+	]
+},
+{
 	"name": "getCpuState",
 	"category": "Emulation",
 	"description": "Returns a table containing key-value pairs that describe the CPU's current state.\n\nNote: The name of the values returned may change from one version to another. Some values may represent the emulator's internal state and may not be useful (these will be hidden in future versions.)",

@@ -118,6 +118,12 @@ public:
 	static int FlushTraceLoggerFile(lua_State* lua);
 	static int StopTraceLoggerFile(lua_State* lua);
 
+	static int GetDebuggerFeatures(lua_State* lua);
+	static int GetInstructionProgress(lua_State* lua);
+	static int GetCallstack(lua_State* lua);
+	static int GetProfilerData(lua_State* lua);
+	static int ResetProfiler(lua_State* lua);
+
 private:
 	static FrameInfo InternalGetScreenSize();
 
