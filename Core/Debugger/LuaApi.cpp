@@ -10,6 +10,8 @@
 #include "Debugger/ITraceLogger.h"
 #include "Debugger/TraceLogFileSaver.h"
 #include "Debugger/CdlManager.h"
+#include "Debugger/CallstackManager.h"
+#include "Debugger/Profiler.h"
 #include "Debugger/LabelManager.h"
 #include "Shared/SystemActionManager.h"
 #include "Shared/Video/DebugHud.h"
@@ -90,6 +92,8 @@ static constexpr uint32_t MaxLuaTraceRows = 100000;
 static constexpr uint32_t MaxLuaAccessCounterRows = 100000;
 static constexpr uint32_t MaxLuaCdlRows = 100000;
 static constexpr uint32_t MaxLuaCdlFunctions = 100000;
+static constexpr uint32_t MaxLuaCallstackFrames = 512;
+static constexpr uint32_t MaxLuaProfilerFunctions = 100000;
 
 void LuaApi::SetContext(ScriptingContext* context)
 {
@@ -181,6 +185,12 @@ int LuaApi::GetLibrary(lua_State* lua)
 		{ "startTraceLoggerFile", LuaApi::StartTraceLoggerFile },
 		{ "flushTraceLoggerFile", LuaApi::FlushTraceLoggerFile },
 		{ "stopTraceLoggerFile", LuaApi::StopTraceLoggerFile },
+
+		{ "getDebuggerFeatures", LuaApi::GetDebuggerFeatures },
+		{ "getInstructionProgress", LuaApi::GetInstructionProgress },
+		{ "getCallstack", LuaApi::GetCallstack },
+		{ "getProfilerData", LuaApi::GetProfilerData },
+		{ "resetProfiler", LuaApi::ResetProfiler },
 
 		{ "addCheat", LuaApi::AddCheat },
 		{ "clearCheats", LuaApi::ClearCheats },
@@ -1403,6 +1413,167 @@ int LuaApi::StopTraceLoggerFile(lua_State* lua)
 	checkparams();
 	_debugger->GetTraceLogFileSaver()->StopLogging();
 	return l.ReturnCount();
+}
+
+static void LuaPushAddressInfo(lua_State* lua, const char* name, const AddressInfo& address)
+{
+	lua_pushstring(lua, name);
+	lua_newtable(lua);
+	lua_pushintvalue(address, address.Address);
+	lua_pushintvalue(memoryType, (int)address.Type);
+	lua_settable(lua, -3);
+}
+
+static void LuaPushMemoryOperationInfo(lua_State* lua, const char* name, const MemoryOperationInfo& operation)
+{
+	lua_pushstring(lua, name);
+	lua_newtable(lua);
+	lua_pushintvalue(address, operation.Address);
+	lua_pushintvalue(value, operation.Value);
+	lua_pushintvalue(operationType, (int)operation.Type);
+	lua_pushintvalue(memoryType, (int)operation.MemType);
+	lua_settable(lua, -3);
+}
+
+int LuaApi::GetDebuggerFeatures(lua_State* lua)
+{
+	LuaCallHelper l(lua);
+	CpuType cpuType = (CpuType)l.ReadInteger();
+	checkEnum(CpuType, cpuType, "invalid cpu type");
+	checkparams();
+	errorCond(!_debugger->HasCpuType(cpuType), "This CPU type is not available for the current system");
+
+	DebuggerFeatures features = _debugger->GetDebuggerFeatures(cpuType);
+	lua_newtable(lua);
+	lua_pushboolvalue(runToIrq, features.RunToIrq);
+	lua_pushboolvalue(runToNmi, features.RunToNmi);
+	lua_pushboolvalue(stepOver, features.StepOver);
+	lua_pushboolvalue(stepOut, features.StepOut);
+	lua_pushboolvalue(stepBack, features.StepBack);
+	lua_pushboolvalue(changeProgramCounter, features.ChangeProgramCounter);
+	lua_pushboolvalue(callStack, features.CallStack);
+	lua_pushboolvalue(cpuCycleStep, features.CpuCycleStep);
+	lua_pushintvalue(irqVectorOffset, features.IrqVectorOffset);
+	lua_pushintvalue(cpuVectorCount, features.CpuVectorCount);
+	lua_pushliteral(lua, "cpuVectors");
+	lua_newtable(lua);
+	for(uint32_t i = 0; i < features.CpuVectorCount && i < std::size(features.CpuVectors); i++) {
+		CpuVectorDefinition& vector = features.CpuVectors[i];
+		lua_newtable(lua);
+		lua_pushliteral(lua, "name");
+		lua_pushlstring(lua, vector.Name, strnlen(vector.Name, sizeof(vector.Name)));
+		lua_settable(lua, -3);
+		lua_pushintvalue(address, vector.Address);
+		lua_pushintvalue(type, (int)vector.Type);
+		lua_rawseti(lua, -2, i + 1);
+	}
+	lua_settable(lua, -3);
+	return 1;
+}
+
+int LuaApi::GetInstructionProgress(lua_State* lua)
+{
+	LuaCallHelper l(lua);
+	CpuType cpuType = (CpuType)l.ReadInteger();
+	checkEnum(CpuType, cpuType, "invalid cpu type");
+	checkparams();
+	errorCond(!_debugger->HasCpuType(cpuType), "This CPU type is not available for the current system");
+
+	DebuggerFeatures features = _debugger->GetDebuggerFeatures(cpuType);
+	errorCond(!features.CpuCycleStep && !features.StepOver && !features.StepOut && !features.CallStack, "This CPU type does not expose debugger instruction progress");
+
+	CpuInstructionProgress progress = _debugger->GetInstructionProgress(cpuType);
+	lua_newtable(lua);
+	lua_pushliteral(lua, "startCycle"); lua_pushinteger(lua, progress.StartCycle); lua_settable(lua, -3);
+	lua_pushliteral(lua, "currentCycle"); lua_pushinteger(lua, progress.CurrentCycle); lua_settable(lua, -3);
+	lua_pushintvalue(lastOpCode, progress.LastOpCode);
+	LuaPushMemoryOperationInfo(lua, "lastMemoryOperation", progress.LastMemOperation);
+	return 1;
+}
+
+int LuaApi::GetCallstack(lua_State* lua)
+{
+	LuaCallHelper l(lua);
+	l.ForceParamCount(2);
+	uint32_t maxFrameCount = l.ReadInteger(MaxLuaCallstackFrames);
+	CpuType cpuType = (CpuType)l.ReadInteger();
+	checkEnum(CpuType, cpuType, "invalid cpu type");
+	checkminparams(1);
+	errorCond(maxFrameCount > MaxLuaCallstackFrames, "Maximum callstack frame count is 512");
+
+	CallstackManager* manager = _debugger->GetCallstackManager(cpuType);
+	errorCond(!manager, "This CPU type does not support callstack data");
+
+	StackFrameInfo frames[MaxLuaCallstackFrames] = {};
+	uint32_t frameCount = MaxLuaCallstackFrames;
+	manager->GetCallstack(frames, frameCount);
+	frameCount = std::min(frameCount, maxFrameCount);
+
+	lua_newtable(lua);
+	for(uint32_t i = 0; i < frameCount; i++) {
+		StackFrameInfo& frame = frames[i];
+		lua_newtable(lua);
+		lua_pushintvalue(source, frame.Source);
+		LuaPushAddressInfo(lua, "absoluteSource", frame.AbsSource);
+		lua_pushintvalue(target, frame.Target);
+		LuaPushAddressInfo(lua, "absoluteTarget", frame.AbsTarget);
+		lua_pushintvalue(returnAddress, frame.Return);
+		lua_pushintvalue(returnStackPointer, frame.ReturnStackPointer);
+		LuaPushAddressInfo(lua, "absoluteReturn", frame.AbsReturn);
+		lua_pushintvalue(flags, (int)frame.Flags);
+		lua_rawseti(lua, -2, i + 1);
+	}
+	return 1;
+}
+
+int LuaApi::GetProfilerData(lua_State* lua)
+{
+	LuaCallHelper l(lua);
+	l.ForceParamCount(2);
+	uint32_t maxFunctionCount = l.ReadInteger(MaxLuaProfilerFunctions);
+	CpuType cpuType = (CpuType)l.ReadInteger();
+	checkEnum(CpuType, cpuType, "invalid cpu type");
+	checkminparams(1);
+	errorCond(maxFunctionCount > MaxLuaProfilerFunctions, "Maximum profiler function count is 100000");
+
+	CallstackManager* manager = _debugger->GetCallstackManager(cpuType);
+	errorCond(!manager, "This CPU type does not support profiler data");
+
+	vector<ProfiledFunction> functions;
+	functions.resize(maxFunctionCount, {});
+	uint32_t functionCount = maxFunctionCount;
+	if(functionCount > 0) {
+		manager->GetProfiler()->GetProfilerData(functions.data(), functionCount);
+	}
+
+	lua_newtable(lua);
+	for(uint32_t i = 0; i < functionCount; i++) {
+		ProfiledFunction& function = functions[i];
+		lua_newtable(lua);
+		LuaPushAddressInfo(lua, "address", function.Address);
+		lua_pushliteral(lua, "exclusiveCycles"); lua_pushinteger(lua, function.ExclusiveCycles); lua_settable(lua, -3);
+		lua_pushliteral(lua, "inclusiveCycles"); lua_pushinteger(lua, function.InclusiveCycles); lua_settable(lua, -3);
+		lua_pushliteral(lua, "callCount"); lua_pushinteger(lua, function.CallCount); lua_settable(lua, -3);
+		lua_pushliteral(lua, "minCycles"); lua_pushinteger(lua, function.MinCycles == UINT64_MAX ? 0 : function.MinCycles); lua_settable(lua, -3);
+		lua_pushliteral(lua, "maxCycles"); lua_pushinteger(lua, function.MaxCycles); lua_settable(lua, -3);
+		lua_pushliteral(lua, "averageCycles"); lua_pushinteger(lua, function.CallCount == 0 ? 0 : function.InclusiveCycles / function.CallCount); lua_settable(lua, -3);
+		lua_pushintvalue(flags, (int)function.Flags);
+		lua_rawseti(lua, -2, i + 1);
+	}
+	return 1;
+}
+
+int LuaApi::ResetProfiler(lua_State* lua)
+{
+	LuaCallHelper l(lua);
+	CpuType cpuType = (CpuType)l.ReadInteger();
+	checkEnum(CpuType, cpuType, "invalid cpu type");
+	checkparams();
+
+	CallstackManager* manager = _debugger->GetCallstackManager(cpuType);
+	errorCond(!manager, "This CPU type does not support profiler data");
+	manager->GetProfiler()->Reset();
+	return 0;
 }
 
 int LuaApi::GetScriptDataFolder(lua_State* lua)

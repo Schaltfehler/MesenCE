@@ -442,7 +442,7 @@ namespace Mesen.Interop
 		[DllImport(DllPath, EntryPoint = "GetProfilerData")] private static extern void GetProfilerDataWrapper(CpuType type, IntPtr profilerData, ref UInt32 functionCount);
 		public static unsafe int GetProfilerData(CpuType type, ref ProfiledFunction[] profilerData)
 		{
-			UInt32 functionCount = 0;
+			UInt32 functionCount = (UInt32)profilerData.Length;
 			fixed(ProfiledFunction* ptr = profilerData) {
 				DebugApi.GetProfilerDataWrapper(type, (IntPtr)ptr, ref functionCount);
 			}

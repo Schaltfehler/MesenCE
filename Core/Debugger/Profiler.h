@@ -44,5 +44,7 @@ public:
 
 	void Reset();
 	void ResetState();
+
+	//functionCount is in/out: pass the buffer capacity in, get the row count back out.
 	void GetProfilerData(ProfiledFunction* profilerData, uint32_t& functionCount);
 };
