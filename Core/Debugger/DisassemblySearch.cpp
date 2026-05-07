@@ -29,11 +29,16 @@ uint32_t DisassemblySearch::SearchDisassembly(CpuType cpuType, const char* searc
 
 	vector<DisassemblyResult> rows = _disassembler->Disassemble(cpuType, bank);
 	if(rows.empty()) {
-		return -1;
+		return 0;
 	}
 	int step = options.SearchBackwards ? -1 : 1;
 
 	string searchStr = searchString;
+	if(!options.MatchCase) {
+		std::transform(searchStr.begin(), searchStr.end(), searchStr.begin(), [](unsigned char c) {
+			return (char)std::tolower(c);
+		});
+	}
 
 	int32_t startRow = _disassembler->GetMatchingRow(rows, startAddress, options.SearchBackwards);
 	if(options.SearchBackwards) {

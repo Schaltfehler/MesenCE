@@ -351,6 +351,56 @@
 	]
 },
 {
+	"name": "getDisassemblyRows",
+	"category": "Miscellaneous",
+	"subcategory": "Disassembly",
+	"description": "Returns a 1-indexed array of tables describing disassembled rows starting at the given address. Each row contains \"address\", \"absoluteAddress\", \"opSize\", \"flags\", \"effectiveAddress\", \"value\", \"lineCpuType\", \"byteCode\", \"text\" and \"comment\". The row count is capped at 10000.\n\nNote: the disassembler is populated lazily as code executes, so freshly loaded regions can return zero rows until they have run.",
+	"parameters": [
+		{ "name": "cpuType", "type": "Enum", "enumName": "cpuType", "description": "CPU type" },
+		{ "name": "startAddress", "type": "Int", "description": "Address of the first row to return" },
+		{ "name": "rowCount", "type": "Int", "description": "Number of rows to return" }
+	],
+	"returnValue": { "type": "Array", "description": "Array of disassembly rows" }
+},
+{
+	"name": "getDisassemblyRowAddress",
+	"category": "Miscellaneous",
+	"subcategory": "Disassembly",
+	"description": "Returns the address that corresponds to a row offset relative to the row containing the given address. Useful for stepping through the disassembly view by row count.",
+	"parameters": [
+		{ "name": "cpuType", "type": "Enum", "enumName": "cpuType", "description": "CPU type" },
+		{ "name": "address", "type": "Int", "description": "Address contained in the reference row" },
+		{ "name": "rowOffset", "type": "Int", "description": "Number of rows to move (positive or negative)" }
+	],
+	"returnValue": { "type": "Int", "description": "Address of the resulting row" }
+},
+{
+	"name": "searchDisassembly",
+	"category": "Miscellaneous",
+	"subcategory": "Disassembly",
+	"description": "Searches the disassembly for the given string starting at startAddress and returns the address of the first match, or nil if no match is found. The optional options table accepts \"matchCase\", \"matchWholeWord\", \"searchBackwards\" and \"skipFirstLine\" booleans, mirroring the debugger UI search.",
+	"parameters": [
+		{ "name": "cpuType", "type": "Enum", "enumName": "cpuType", "description": "CPU type" },
+		{ "name": "searchString", "type": "String", "description": "Text to search for" },
+		{ "name": "startAddress", "type": "Int", "description": "Address to start the search from" },
+		{ "name": "options", "type": "Table", "description": "Search options", "defaultValue": "no options" }
+	],
+	"returnValue": { "type": "Int / nil", "description": "Address of the match, or nil" }
+},
+{
+	"name": "findDisassemblyOccurrences",
+	"category": "Miscellaneous",
+	"subcategory": "Disassembly",
+	"description": "Searches the disassembly for the given string and returns a 1-indexed array of disassembly rows for every match. Each row has the same shape as the rows returned by getDisassemblyRows. The result count is capped at 10000.",
+	"parameters": [
+		{ "name": "cpuType", "type": "Enum", "enumName": "cpuType", "description": "CPU type" },
+		{ "name": "searchString", "type": "String", "description": "Text to search for" },
+		{ "name": "maxResultCount", "type": "Int", "description": "Maximum number of matches to return" },
+		{ "name": "options", "type": "Table", "description": "Search options", "defaultValue": "no options" }
+	],
+	"returnValue": { "type": "Array", "description": "Array of disassembly rows" }
+},
+{
 	"name": "getCpuState",
 	"category": "Emulation",
 	"description": "Returns a table containing key-value pairs that describe the CPU's current state.\n\nNote: The name of the values returned may change from one version to another. Some values may represent the emulator's internal state and may not be useful (these will be hidden in future versions.)",
