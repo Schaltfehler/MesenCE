@@ -15,23 +15,33 @@ public:
 		StopLogging();
 	}
 
-	void StartLogging(string filename)
+	bool StartLogging(string filename)
 	{
+		StopLogging();
 		_outputBuffer.clear();
+		_outputFile.clear();
 		_outputFile.open(filename, ios::out | ios::binary);
-		_enabled = true;
+		_enabled = _outputFile.is_open();
+		return _enabled;
+	}
+
+	void Flush()
+	{
+		if(_outputFile) {
+			if(!_outputBuffer.empty()) {
+				_outputFile << _outputBuffer;
+				_outputBuffer.clear();
+			}
+			_outputFile.flush();
+		}
 	}
 
 	void StopLogging()
 	{
-		if(_enabled) {
+		if(_enabled || _outputFile.is_open()) {
+			Flush();
 			_enabled = false;
-			if(_outputFile) {
-				if(!_outputBuffer.empty()) {
-					_outputFile << _outputBuffer;
-				}
-				_outputFile.close();
-			}
+			_outputFile.close();
 		}
 	}
 
@@ -41,8 +51,7 @@ public:
 	{
 		_outputBuffer += log + '\n';
 		if(_outputBuffer.size() > 32768) {
-			_outputFile << _outputBuffer;
-			_outputBuffer.clear();
+			Flush();
 		}
 	}
 };

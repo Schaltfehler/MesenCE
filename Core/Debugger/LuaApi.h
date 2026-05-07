@@ -110,6 +110,14 @@ public:
 	static int GetCdlFunctions(lua_State* lua);
 	static int ResetCdl(lua_State* lua);
 
+	static int GetTraceRows(lua_State* lua);
+	static int GetTraceSize(lua_State* lua);
+	static int ClearTrace(lua_State* lua);
+	static int SetTraceOptions(lua_State* lua);
+	static int StartTraceLoggerFile(lua_State* lua);
+	static int FlushTraceLoggerFile(lua_State* lua);
+	static int StopTraceLoggerFile(lua_State* lua);
+
 private:
 	static FrameInfo InternalGetScreenSize();
 

@@ -1659,11 +1659,17 @@ namespace Mesen.Interop
 
 	public unsafe struct TraceRow
 	{
+		public UInt64 RowId;
 		public UInt32 ProgramCounter;
 		public CpuType Type;
 
 		public fixed byte ByteCode[8];
 		public byte ByteCodeSize;
+		public UInt32 Cycle;
+		public UInt32 HClock;
+		public Int32 Scanline;
+		public UInt32 FrameCount;
+		public UInt64 CycleCount;
 
 		public UInt32 LogSize;
 		public fixed byte LogOutput[500];

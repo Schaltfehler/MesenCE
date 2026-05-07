@@ -123,7 +123,7 @@ extern "C"
 
 	DllExport void __stdcall StartLogTraceToFile(const char* filename)
 	{
-		WithDebugger(void, GetTraceLogFileSaver()->StartLogging(filename));
+		WrapDebuggerCall<void>([&](Debugger* dbg) -> void { dbg->GetTraceLogFileSaver()->StartLogging(filename); });
 	}
 
 	DllExport void __stdcall StopLogTraceToFile()
