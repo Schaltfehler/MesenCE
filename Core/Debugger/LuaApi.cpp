@@ -12,6 +12,8 @@
 #include "Debugger/CdlManager.h"
 #include "Debugger/CallstackManager.h"
 #include "Debugger/Profiler.h"
+#include "Debugger/Disassembler.h"
+#include "Debugger/DisassemblySearch.h"
 #include "Debugger/LabelManager.h"
 #include "Shared/SystemActionManager.h"
 #include "Shared/Video/DebugHud.h"
@@ -94,6 +96,8 @@ static constexpr uint32_t MaxLuaCdlRows = 100000;
 static constexpr uint32_t MaxLuaCdlFunctions = 100000;
 static constexpr uint32_t MaxLuaCallstackFrames = 512;
 static constexpr uint32_t MaxLuaProfilerFunctions = 100000;
+static constexpr uint32_t MaxLuaDisassemblyRows = 10000;
+static constexpr uint32_t MaxLuaDisassemblyOccurrences = 10000;
 
 void LuaApi::SetContext(ScriptingContext* context)
 {
@@ -191,6 +195,11 @@ int LuaApi::GetLibrary(lua_State* lua)
 		{ "getCallstack", LuaApi::GetCallstack },
 		{ "getProfilerData", LuaApi::GetProfilerData },
 		{ "resetProfiler", LuaApi::ResetProfiler },
+
+		{ "getDisassemblyRows", LuaApi::GetDisassemblyRows },
+		{ "getDisassemblyRowAddress", LuaApi::GetDisassemblyRowAddress },
+		{ "searchDisassembly", LuaApi::SearchDisassembly },
+		{ "findDisassemblyOccurrences", LuaApi::FindDisassemblyOccurrences },
 
 		{ "addCheat", LuaApi::AddCheat },
 		{ "clearCheats", LuaApi::ClearCheats },
@@ -1574,6 +1583,143 @@ int LuaApi::ResetProfiler(lua_State* lua)
 	errorCond(!manager, "This CPU type does not support profiler data");
 	manager->GetProfiler()->Reset();
 	return 0;
+}
+
+static void LuaPushEffectiveAddressInfo(lua_State* lua, const EffectiveAddressInfo& effectiveAddress)
+{
+	lua_newtable(lua);
+	lua_pushliteral(lua, "address"); lua_pushinteger(lua, effectiveAddress.Address); lua_settable(lua, -3);
+	lua_pushintvalue(memoryType, (int)effectiveAddress.Type);
+	lua_pushintvalue(valueSize, effectiveAddress.ValueSize);
+	lua_pushboolvalue(showAddress, effectiveAddress.ShowAddress);
+}
+
+static void LuaPushCodeLineData(lua_State* lua, const CodeLineData& row)
+{
+	lua_newtable(lua);
+	lua_pushintvalue(address, row.Address);
+	LuaPushAddressInfo(lua, "absoluteAddress", row.AbsoluteAddress);
+	lua_pushintvalue(opSize, row.OpSize);
+	lua_pushintvalue(flags, row.Flags);
+
+	lua_pushliteral(lua, "effectiveAddress");
+	LuaPushEffectiveAddressInfo(lua, row.EffectiveAddress);
+	lua_settable(lua, -3);
+
+	lua_pushintvalue(value, row.Value);
+	lua_pushintvalue(lineCpuType, (int)row.LineCpuType);
+
+	lua_pushliteral(lua, "byteCode");
+	lua_newtable(lua);
+	for(uint32_t i = 0; i < row.OpSize && i < sizeof(row.ByteCode); i++) {
+		lua_pusharrayvalue(i + 1, row.ByteCode[i]);
+	}
+	lua_settable(lua, -3);
+
+	lua_pushliteral(lua, "text");
+	lua_pushlstring(lua, row.Text, strnlen(row.Text, sizeof(row.Text)));
+	lua_settable(lua, -3);
+	lua_pushliteral(lua, "comment");
+	lua_pushlstring(lua, row.Comment, strnlen(row.Comment, sizeof(row.Comment)));
+	lua_settable(lua, -3);
+}
+
+static DisassemblySearchOptions LuaReadDisassemblySearchOptions(lua_State* lua, int index)
+{
+	DisassemblySearchOptions options = {};
+	if(lua_gettop(lua) >= index && !lua_isnil(lua, index)) {
+		luaL_checktype(lua, index, LUA_TTABLE);
+		lua_getfield(lua, index, "matchCase"); options.MatchCase = lua_toboolean(lua, -1); lua_pop(lua, 1);
+		lua_getfield(lua, index, "matchWholeWord"); options.MatchWholeWord = lua_toboolean(lua, -1); lua_pop(lua, 1);
+		lua_getfield(lua, index, "searchBackwards"); options.SearchBackwards = lua_toboolean(lua, -1); lua_pop(lua, 1);
+		lua_getfield(lua, index, "skipFirstLine"); options.SkipFirstLine = lua_toboolean(lua, -1); lua_pop(lua, 1);
+	}
+	return options;
+}
+
+int LuaApi::GetDisassemblyRows(lua_State* lua)
+{
+	LuaCallHelper l(lua);
+	uint32_t rowCount = l.ReadInteger();
+	uint32_t startAddress = l.ReadInteger();
+	CpuType cpuType = (CpuType)l.ReadInteger();
+	checkEnum(CpuType, cpuType, "invalid cpu type");
+	checkparams();
+	errorCond(!_debugger->HasCpuType(cpuType), "This CPU type is not available for the current system");
+	errorCond(rowCount > MaxLuaDisassemblyRows, "Maximum disassembly row count is 10000");
+
+	vector<CodeLineData> rows;
+	rows.resize(rowCount, {});
+	uint32_t returnedRows = rowCount > 0 ? _debugger->GetDisassembler()->GetDisassemblyOutput(cpuType, startAddress, rows.data(), rowCount) : 0;
+
+	lua_newtable(lua);
+	for(uint32_t i = 0; i < returnedRows; i++) {
+		LuaPushCodeLineData(lua, rows[i]);
+		lua_rawseti(lua, -2, i + 1);
+	}
+	return 1;
+}
+
+int LuaApi::GetDisassemblyRowAddress(lua_State* lua)
+{
+	LuaCallHelper l(lua);
+	int32_t rowOffset = (int32_t)l.ReadInteger();
+	uint32_t address = l.ReadInteger();
+	CpuType cpuType = (CpuType)l.ReadInteger();
+	checkEnum(CpuType, cpuType, "invalid cpu type");
+	checkparams();
+	errorCond(!_debugger->HasCpuType(cpuType), "This CPU type is not available for the current system");
+
+	lua_pushinteger(lua, _debugger->GetDisassembler()->GetDisassemblyRowAddress(cpuType, address, rowOffset));
+	return 1;
+}
+
+int LuaApi::SearchDisassembly(lua_State* lua)
+{
+	int paramCount = lua_gettop(lua);
+	errorCond(paramCount != 3 && paramCount != 4, "searchDisassembly expects a CPU type, search string, start address, and optional options table");
+	CpuType cpuType = (CpuType)luaL_checkinteger(lua, 1);
+	checkEnum(CpuType, cpuType, "invalid cpu type");
+	errorCond(!_debugger->HasCpuType(cpuType), "This CPU type is not available for the current system");
+	const char* searchString = luaL_checkstring(lua, 2);
+	errorCond(searchString[0] == '\0', "Disassembly search string cannot be empty");
+	int32_t startAddress = (int32_t)luaL_checkinteger(lua, 3);
+	DisassemblySearchOptions options = LuaReadDisassemblySearchOptions(lua, 4);
+
+	int32_t address = _debugger->GetDisassemblySearch()->SearchDisassembly(cpuType, searchString, startAddress, options);
+	if(address < 0) {
+		lua_pushnil(lua);
+	} else {
+		lua_pushinteger(lua, address);
+	}
+	return 1;
+}
+
+int LuaApi::FindDisassemblyOccurrences(lua_State* lua)
+{
+	int paramCount = lua_gettop(lua);
+	errorCond(paramCount != 3 && paramCount != 4, "findDisassemblyOccurrences expects a CPU type, search string, maximum result count, and optional options table");
+	CpuType cpuType = (CpuType)luaL_checkinteger(lua, 1);
+	checkEnum(CpuType, cpuType, "invalid cpu type");
+	errorCond(!_debugger->HasCpuType(cpuType), "This CPU type is not available for the current system");
+	const char* searchString = luaL_checkstring(lua, 2);
+	errorCond(searchString[0] == '\0', "Disassembly search string cannot be empty");
+	lua_Integer requestedMax = luaL_checkinteger(lua, 3);
+	errorCond(requestedMax < 0, "Maximum disassembly occurrence count cannot be negative");
+	errorCond(requestedMax > MaxLuaDisassemblyOccurrences, "Maximum disassembly occurrence count is 10000");
+	uint32_t maxResultCount = (uint32_t)requestedMax;
+	DisassemblySearchOptions options = LuaReadDisassemblySearchOptions(lua, 4);
+
+	vector<CodeLineData> rows;
+	rows.resize(maxResultCount, {});
+	uint32_t resultCount = maxResultCount > 0 ? _debugger->GetDisassemblySearch()->FindOccurrences(cpuType, searchString, options, rows.data(), maxResultCount) : 0;
+
+	lua_newtable(lua);
+	for(uint32_t i = 0; i < resultCount; i++) {
+		LuaPushCodeLineData(lua, rows[i]);
+		lua_rawseti(lua, -2, i + 1);
+	}
+	return 1;
 }
 
 int LuaApi::GetScriptDataFolder(lua_State* lua)

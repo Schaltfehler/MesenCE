@@ -124,6 +124,11 @@ public:
 	static int GetProfilerData(lua_State* lua);
 	static int ResetProfiler(lua_State* lua);
 
+	static int GetDisassemblyRows(lua_State* lua);
+	static int GetDisassemblyRowAddress(lua_State* lua);
+	static int SearchDisassembly(lua_State* lua);
+	static int FindDisassemblyOccurrences(lua_State* lua);
+
 private:
 	static FrameInfo InternalGetScreenSize();
 
