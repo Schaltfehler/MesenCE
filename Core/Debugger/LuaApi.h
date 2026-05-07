@@ -104,6 +104,11 @@ public:
 	static int ResetAccessCounters(lua_State* lua);
 
 	static int GetCdlData(lua_State* lua);
+	static int GetCdlDataRange(lua_State* lua);
+	static int GetCdlRows(lua_State* lua);
+	static int GetCdlSummary(lua_State* lua);
+	static int GetCdlFunctions(lua_State* lua);
+	static int ResetCdl(lua_State* lua);
 
 private:
 	static FrameInfo InternalGetScreenSize();

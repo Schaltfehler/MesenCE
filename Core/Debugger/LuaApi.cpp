@@ -85,6 +85,8 @@ static uint64_t GetAccessCounterValue(AddressCounters& counter, AccessCounterTyp
 }
 
 static constexpr uint32_t MaxLuaAccessCounterRows = 100000;
+static constexpr uint32_t MaxLuaCdlRows = 100000;
+static constexpr uint32_t MaxLuaCdlFunctions = 100000;
 
 void LuaApi::SetContext(ScriptingContext* context)
 {
@@ -163,6 +165,11 @@ int LuaApi::GetLibrary(lua_State* lua)
 		{ "resetAccessCounters", LuaApi::ResetAccessCounters },
 
 		{ "getCdlData", LuaApi::GetCdlData },
+		{ "getCdlDataRange", LuaApi::GetCdlDataRange },
+		{ "getCdlRows", LuaApi::GetCdlRows },
+		{ "getCdlSummary", LuaApi::GetCdlSummary },
+		{ "getCdlFunctions", LuaApi::GetCdlFunctions },
+		{ "resetCdl", LuaApi::ResetCdl },
 
 		{ "addCheat", LuaApi::AddCheat },
 		{ "clearCheats", LuaApi::ClearCheats },
@@ -1105,6 +1112,138 @@ int LuaApi::GetCdlData(lua_State* lua)
 	}
 
 	return 1;
+}
+
+int LuaApi::GetCdlDataRange(lua_State* lua)
+{
+	LuaCallHelper l(lua);
+	uint32_t length = l.ReadInteger();
+	uint32_t startAddress = l.ReadInteger();
+	MemoryType memoryType = (MemoryType)l.ReadInteger();
+	checkEnum(MemoryType, memoryType, "Invalid memory type");
+	checkparams();
+
+	if(!_debugger->GetCdlManager()->GetCodeDataLogger(memoryType)) {
+		error("This memory type does not support CDL data (only some ROM memory types support it)");
+	}
+
+	uint32_t size = _memoryDumper->GetMemorySize(memoryType);
+	errorCond(startAddress > size, "Start address is outside the selected memory type");
+	errorCond(length > size - startAddress, "Requested range extends past the end of the selected memory type");
+
+	vector<uint8_t> cdlData;
+	cdlData.resize(length, {});
+	_debugger->GetCdlManager()->GetCdlData(startAddress, length, memoryType, cdlData.data());
+
+	lua_newtable(lua);
+	for(uint32_t i = 0; i < length; i++) {
+		lua_pushinteger(lua, cdlData[i]);
+		lua_rawseti(lua, -2, i);
+	}
+
+	return 1;
+}
+
+int LuaApi::GetCdlRows(lua_State* lua)
+{
+	LuaCallHelper l(lua);
+	uint32_t length = l.ReadInteger();
+	uint32_t startAddress = l.ReadInteger();
+	MemoryType memoryType = (MemoryType)l.ReadInteger();
+	checkEnum(MemoryType, memoryType, "Invalid memory type");
+	checkparams();
+
+	if(!_debugger->GetCdlManager()->GetCodeDataLogger(memoryType)) {
+		error("This memory type does not support CDL data (only some ROM memory types support it)");
+	}
+
+	uint32_t size = _memoryDumper->GetMemorySize(memoryType);
+	errorCond(length > MaxLuaCdlRows, "Maximum CDL row count is 100000");
+	errorCond(startAddress > size, "Start address is outside the selected memory type");
+	errorCond(length > size - startAddress, "Requested range extends past the end of the selected memory type");
+
+	vector<uint8_t> cdlData;
+	cdlData.resize(length, {});
+	_debugger->GetCdlManager()->GetCdlData(startAddress, length, memoryType, cdlData.data());
+
+	lua_newtable(lua);
+	for(uint32_t i = 0; i < length; i++) {
+		uint8_t raw = cdlData[i];
+		lua_newtable(lua);
+		lua_pushintvalue(address, startAddress + i);
+		lua_pushintvalue(cdl, raw);
+		lua_pushboolvalue(code, (raw & CdlFlags::Code) != 0);
+		lua_pushboolvalue(data, (raw & CdlFlags::Data) != 0);
+		lua_pushboolvalue(jumpTarget, (raw & CdlFlags::JumpTarget) != 0);
+		lua_pushboolvalue(subEntryPoint, (raw & CdlFlags::SubEntryPoint) != 0);
+		lua_rawseti(lua, -2, i + 1);
+	}
+
+	return 1;
+}
+
+int LuaApi::GetCdlSummary(lua_State* lua)
+{
+	LuaCallHelper l(lua);
+	MemoryType memoryType = (MemoryType)l.ReadInteger();
+	checkEnum(MemoryType, memoryType, "Invalid memory type");
+	checkparams();
+
+	if(!_debugger->GetCdlManager()->GetCodeDataLogger(memoryType)) {
+		error("This memory type does not support CDL data (only some ROM memory types support it)");
+	}
+
+	CdlStatistics stats = _debugger->GetCdlManager()->GetCdlStatistics(memoryType);
+	lua_newtable(lua);
+	lua_pushintvalue(codeBytes, stats.CodeBytes);
+	lua_pushintvalue(dataBytes, stats.DataBytes);
+	lua_pushintvalue(totalBytes, stats.TotalBytes);
+	lua_pushintvalue(jumpTargetCount, stats.JumpTargetCount);
+	lua_pushintvalue(functionCount, stats.FunctionCount);
+	lua_pushintvalue(drawnChrBytes, stats.DrawnChrBytes);
+	lua_pushintvalue(totalChrBytes, stats.TotalChrBytes);
+	return 1;
+}
+
+int LuaApi::GetCdlFunctions(lua_State* lua)
+{
+	LuaCallHelper l(lua);
+	l.ForceParamCount(2);
+	uint32_t maxResultCount = l.ReadInteger(MaxLuaCdlFunctions);
+	MemoryType memoryType = (MemoryType)l.ReadInteger();
+	checkEnum(MemoryType, memoryType, "Invalid memory type");
+	checkminparams(1);
+	errorCond(maxResultCount > MaxLuaCdlFunctions, "Maximum CDL function count is 100000");
+
+	if(!_debugger->GetCdlManager()->GetCodeDataLogger(memoryType)) {
+		error("This memory type does not support CDL data (only some ROM memory types support it)");
+	}
+
+	vector<uint32_t> functions;
+	functions.resize(maxResultCount, 0);
+	uint32_t count = maxResultCount > 0 ? _debugger->GetCdlManager()->GetCdlFunctions(memoryType, functions.data(), maxResultCount) : 0;
+
+	lua_newtable(lua);
+	for(uint32_t i = 0; i < count; i++) {
+		lua_pushinteger(lua, functions[i]);
+		lua_rawseti(lua, -2, i + 1);
+	}
+	return 1;
+}
+
+int LuaApi::ResetCdl(lua_State* lua)
+{
+	LuaCallHelper l(lua);
+	MemoryType memoryType = (MemoryType)l.ReadInteger();
+	checkEnum(MemoryType, memoryType, "Invalid memory type");
+	checkparams();
+
+	if(!_debugger->GetCdlManager()->GetCodeDataLogger(memoryType)) {
+		error("This memory type does not support CDL data (only some ROM memory types support it)");
+	}
+
+	_debugger->GetCdlManager()->ResetCdl(memoryType);
+	return l.ReturnCount();
 }
 
 int LuaApi::GetScriptDataFolder(lua_State* lua)
