@@ -1,17 +1,20 @@
 #pragma once
 #include <unordered_map>
 #include <vector>
+#include <memory>
 #include "Shared/Interfaces/IKeyManager.h"
 #include "Shared/KeyDefinitions.h"
 
-class MacOSGameController;
+class SdlGameControllerManager;
+class MacOSHIDControllerManager;
 class Emulator;
 
 class MacOSKeyManager : public IKeyManager
 {
 private:
 	Emulator* _emu;
-	std::vector<shared_ptr<MacOSGameController>> _controllers;
+	unique_ptr<SdlGameControllerManager> _sdlGamepads;
+	unique_ptr<MacOSHIDControllerManager> _hidGamepads;
 
 	vector<KeyDefinition> _keyDefinitions;
 	bool _keyState[0x205];
@@ -21,8 +24,6 @@ private:
 	bool _disableAllKeys;
 
 	void* _eventMonitor;
-	void* _connectObserver;
-	void* _disconnectObserver;
 
 	//Mapping of MacOS keycodes to Avalonia keycodes
 	uint16_t _keyCodeMap[128] = {
@@ -42,8 +43,6 @@ private:
 	};
 
 	void HandleModifiers(uint32_t flags);
-
-	void AddController(void* controller);
 
 public:
 	MacOSKeyManager(Emulator* emu);
