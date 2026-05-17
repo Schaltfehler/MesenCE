@@ -1,10 +1,10 @@
 #import <Foundation/Foundation.h>
 #import <Cocoa/Cocoa.h>
-#import <GameController/GameController.h>
 
 #include <algorithm>
 #include "MacOSKeyManager.h"
-#include "MacOSGameController.h"
+#include "MacOSHIDControllerManager.h"
+#include "Sdl/SdlGameControllerManager.h"
 //The MacOS SDK defines a global function 'Debugger', colliding with Mesen's Debugger class
 //Redefine it temporarily so the headers don't cause compilation errors due to this
 #define Debugger MesenDebugger
@@ -70,40 +70,13 @@ MacOSKeyManager::MacOSKeyManager(Emulator* emu)
 		return nil;
 	}];
 
-	_connectObserver = [[NSNotificationCenter defaultCenter] addObserverForName:GCControllerDidConnectNotification object:nil queue:nil usingBlock:^ void (NSNotification* notification) {
-		GCController* controller = (GCController*) [notification object];
-
-		if([controller extendedGamepad] == nil) {
-			MessageManager::Log(std::string("[Input] Device ignored (Does not support extended gamepad) - Name: ") + [[controller vendorName] UTF8String]);
-		} else {
-			_controllers.push_back(std::shared_ptr<MacOSGameController>(new MacOSGameController(_emu, controller)));
-			MessageManager::Log(std::string("[Input Connected] Name: ") + [[controller vendorName] UTF8String]);
-		}
-	}];
-
-	_disconnectObserver = [[NSNotificationCenter defaultCenter] addObserverForName:GCControllerDidDisconnectNotification object:nil queue:nil usingBlock:^ void (NSNotification* notification) {
-		GCController* controller = (GCController*) [notification object];
-
-		int indexToRemove = -1;
-		for(int i = 0; i < _controllers.size(); i++) {
-			if(_controllers[i]->IsGameController(controller)) {
-				indexToRemove = i;
-				break;
-			}
-		}
-
-		if(indexToRemove >= 0) {
-			_controllers.erase(_controllers.begin() + indexToRemove);
-			MessageManager::Log("[Input Device] Disconnected");
-		}
-	}];
+	_sdlGamepads = std::make_unique<SdlGameControllerManager>(_emu);
+	_hidGamepads = std::make_unique<MacOSHIDControllerManager>(_emu);
 }
 
 MacOSKeyManager::~MacOSKeyManager()
 {
 	[NSEvent removeMonitor:(id) _eventMonitor];
-	[[NSNotificationCenter defaultCenter] removeObserver:(id) _connectObserver];
-	[[NSNotificationCenter defaultCenter] removeObserver:(id) _disconnectObserver];
 }
 
 void MacOSKeyManager::HandleModifiers(uint32_t flags)
@@ -133,9 +106,11 @@ bool MacOSKeyManager::IsKeyPressed(uint16_t key)
 	if(key >= MacOSKeyManager::BaseGamepadIndex) {
 		uint8_t gamepadPort = (key - MacOSKeyManager::BaseGamepadIndex) / 0x100;
 		uint8_t gamepadButton = (key - MacOSKeyManager::BaseGamepadIndex) % 0x100;
-		if(_controllers.size() > gamepadPort) {
-			return _controllers[gamepadPort]->IsButtonPressed(gamepadButton);
+		size_t sdlCount = _sdlGamepads->GetControllerCount();
+		if(gamepadPort < sdlCount) {
+			return _sdlGamepads->IsButtonPressed(gamepadPort, gamepadButton);
 		}
+		return _hidGamepads->IsButtonPressed((uint8_t)(gamepadPort - sdlCount), gamepadButton);
 	} else if(key < 0x205) {
 		return _keyState[key] != 0;
 	}
@@ -147,7 +122,11 @@ optional<int16_t> MacOSKeyManager::GetAxisPosition(uint16_t key)
 	if(key >= MacOSKeyManager::BaseGamepadIndex) {
 		uint8_t port = (key - MacOSKeyManager::BaseGamepadIndex) / 0x100;
 		uint8_t button = (key - MacOSKeyManager::BaseGamepadIndex) % 0x100;
-		return _controllers[port]->GetAxisPosition(button);
+		size_t sdlCount = _sdlGamepads->GetControllerCount();
+		if(port < sdlCount) {
+			return _sdlGamepads->GetAxisPosition(port, button);
+		}
+		return _hidGamepads->GetAxisPosition((uint8_t)(port - sdlCount), button);
 	}
 	return std::nullopt;
 }
@@ -160,10 +139,19 @@ bool MacOSKeyManager::IsMouseButtonPressed(MouseButton button)
 vector<uint16_t> MacOSKeyManager::GetPressedKeys()
 {
 	vector<uint16_t> pressedKeys;
-	for(size_t i = 0; i < _controllers.size(); i++) {
+	size_t sdlCount = _sdlGamepads->GetControllerCount();
+	size_t hidCount = _hidGamepads->GetControllerCount();
+	for(size_t i = 0; i < sdlCount; i++) {
 		for(int j = 0; j < 24; j++) {
-			if(_controllers[i]->IsButtonPressed(j)) {
+			if(_sdlGamepads->IsButtonPressed((uint8_t)i, (uint8_t)j)) {
 				pressedKeys.push_back(MacOSKeyManager::BaseGamepadIndex + i * 0x100 + j);
+			}
+		}
+	}
+	for(size_t i = 0; i < hidCount; i++) {
+		for(int j = 0; j < 24; j++) {
+			if(_hidGamepads->IsButtonPressed((uint8_t)i, (uint8_t)j)) {
+				pressedKeys.push_back(MacOSKeyManager::BaseGamepadIndex + (sdlCount + i) * 0x100 + j);
 			}
 		}
 	}
@@ -196,8 +184,7 @@ uint16_t MacOSKeyManager::GetKeyCode(string keyName)
 
 void MacOSKeyManager::UpdateDevices()
 {
-	//TODO: NOT IMPLEMENTED YET
-	//Only needed to detect newly plugged in devices
+	_sdlGamepads->UpdateDevices();
 }
 
 bool MacOSKeyManager::SetKeyState(uint16_t scanCode, bool state)
@@ -221,7 +208,6 @@ void MacOSKeyManager::SetDisabled(bool disabled)
 
 void MacOSKeyManager::SetForceFeedback(uint16_t magnitudeRight, uint16_t magnitudeLeft)
 {
-	for(auto& controller : _controllers) {
-		controller->SetForceFeedback(magnitudeRight, magnitudeLeft);
-	}
+	_sdlGamepads->SetForceFeedback(magnitudeRight, magnitudeLeft);
+	_hidGamepads->SetForceFeedback(magnitudeRight, magnitudeLeft);
 }
