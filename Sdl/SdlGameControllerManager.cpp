@@ -6,6 +6,23 @@
 
 #include <chrono>
 
+namespace
+{
+	bool IsNintendoClassicDevice(int deviceIndex)
+	{
+		if(SDL_JoystickGetDeviceVendor(deviceIndex) != 0x057E) {
+			return false;
+		}
+
+		switch(SDL_JoystickGetDeviceProduct(deviceIndex)) {
+			case 0x2017: // NSO SNES Controller
+				return true;
+			default:
+				return false;
+		}
+	}
+}
+
 SdlGameControllerManager::SdlGameControllerManager(Emulator* emu)
 {
 	_emu = emu;
@@ -33,7 +50,7 @@ SdlGameControllerManager::SdlGameControllerManager(Emulator* emu)
 	}
 
 	for(int i = 0; i < SDL_NumJoysticks(); i++) {
-		if(SDL_IsGameController(i)) {
+		if(!IsNintendoClassicDevice(i) && SDL_IsGameController(i)) {
 			OpenController(i);
 		}
 	}
@@ -77,7 +94,7 @@ void SdlGameControllerManager::UpdateDevices()
 
 	SDL_Event ev;
 	while(SDL_PeepEvents(&ev, 1, SDL_GETEVENT, SDL_CONTROLLERDEVICEADDED, SDL_CONTROLLERDEVICEREMAPPED) > 0) {
-		if(ev.type == SDL_CONTROLLERDEVICEADDED) {
+		if(ev.type == SDL_CONTROLLERDEVICEADDED && !IsNintendoClassicDevice(ev.cdevice.which)) {
 			OpenController(ev.cdevice.which);
 		} else if(ev.type == SDL_CONTROLLERDEVICEREMOVED) {
 			CloseController(ev.cdevice.which);
@@ -87,6 +104,10 @@ void SdlGameControllerManager::UpdateDevices()
 
 void SdlGameControllerManager::OpenController(int deviceIndex)
 {
+	if(IsNintendoClassicDevice(deviceIndex)) {
+		return;
+	}
+
 	SDL_JoystickID deviceInstanceId = SDL_JoystickGetDeviceInstanceID(deviceIndex);
 	{
 		std::lock_guard<std::mutex> lock(_controllersLock);
