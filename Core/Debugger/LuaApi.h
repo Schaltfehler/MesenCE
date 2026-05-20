@@ -39,8 +39,12 @@ public:
 
 	static int RegisterMemoryCallback(lua_State* lua);
 	static int UnregisterMemoryCallback(lua_State* lua);
+	static int RegisterMemoryPayloadCallback(lua_State* lua);
+	static int UnregisterMemoryPayloadCallback(lua_State* lua);
 	static int RegisterEventCallback(lua_State* lua);
 	static int UnregisterEventCallback(lua_State* lua);
+	static int RegisterEventPayloadCallback(lua_State* lua);
+	static int UnregisterEventPayloadCallback(lua_State* lua);
 
 	static int MeasureString(lua_State* lua);
 	static int DrawString(lua_State* lua);
