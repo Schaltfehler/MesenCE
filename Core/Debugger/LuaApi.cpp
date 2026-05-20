@@ -142,8 +142,12 @@ int LuaApi::GetLibrary(lua_State* lua)
 
 		{ "addMemoryCallback", LuaApi::RegisterMemoryCallback },
 		{ "removeMemoryCallback", LuaApi::UnregisterMemoryCallback },
+		{ "addMemoryCallbackWithPayload", LuaApi::RegisterMemoryPayloadCallback },
+		{ "removeMemoryCallbackWithPayload", LuaApi::UnregisterMemoryPayloadCallback },
 		{ "addEventCallback", LuaApi::RegisterEventCallback },
 		{ "removeEventCallback", LuaApi::UnregisterEventCallback },
+		{ "addEventCallbackWithPayload", LuaApi::RegisterEventPayloadCallback },
+		{ "removeEventCallbackWithPayload", LuaApi::UnregisterEventPayloadCallback },
 
 		{ "measureString", LuaApi::MeasureString },
 		{ "drawString", LuaApi::DrawString },
@@ -247,8 +251,12 @@ int LuaApi::GetLibrary(lua_State* lua)
 	static const luaL_Reg callbacksLib[] = {
 		{ "addMemory", LuaApi::RegisterMemoryCallback },
 		{ "removeMemory", LuaApi::UnregisterMemoryCallback },
+		{ "onMemory", LuaApi::RegisterMemoryPayloadCallback },
+		{ "offMemory", LuaApi::UnregisterMemoryPayloadCallback },
 		{ "addEvent", LuaApi::RegisterEventCallback },
 		{ "removeEvent", LuaApi::UnregisterEventCallback },
+		{ "onEvent", LuaApi::RegisterEventPayloadCallback },
+		{ "offEvent", LuaApi::UnregisterEventPayloadCallback },
 		{ NULL, NULL }
 	};
 
@@ -585,6 +593,51 @@ int LuaApi::GetLabelAddress(lua_State* lua)
 	return 1;
 }
 
+static int32_t LuaReadIntegerField(lua_State* lua, int tableIndex, const char* fieldName, int32_t defaultValue, bool required)
+{
+	lua_getfield(lua, tableIndex, fieldName);
+	if(lua_isnil(lua, -1)) {
+		lua_pop(lua, 1);
+		if(required) {
+			luaL_error(lua, (string("missing required callback option: ") + fieldName).c_str());
+		}
+		return defaultValue;
+	}
+	int32_t value = (int32_t)luaL_checkinteger(lua, -1);
+	lua_pop(lua, 1);
+	return value;
+}
+
+struct LuaMemoryCallbackOptions
+{
+	CallbackType Callback;
+	int32_t StartAddress;
+	int32_t EndAddress;
+	MemoryType Mem;
+	CpuType Cpu;
+};
+
+static LuaMemoryCallbackOptions LuaReadMemoryCallbackOptions(lua_State* lua, int tableIndex, MemoryType defaultMemType, CpuType defaultCpuType)
+{
+	luaL_checktype(lua, tableIndex, LUA_TTABLE);
+	LuaMemoryCallbackOptions options = {};
+	options.Callback = (CallbackType)LuaReadIntegerField(lua, tableIndex, "callbackType", 0, true);
+	options.StartAddress = LuaReadIntegerField(lua, tableIndex, "startAddress", 0, true);
+	options.EndAddress = LuaReadIntegerField(lua, tableIndex, "endAddress", -1, false);
+	options.Mem = (MemoryType)LuaReadIntegerField(lua, tableIndex, "memoryType", (int)defaultMemType, false);
+	options.Cpu = (CpuType)LuaReadIntegerField(lua, tableIndex, "cpuType", (int)defaultCpuType, false);
+	if(options.EndAddress == -1) {
+		options.EndAddress = options.StartAddress;
+	}
+	return options;
+}
+
+static EventType LuaReadEventCallbackOptions(lua_State* lua, int tableIndex)
+{
+	luaL_checktype(lua, tableIndex, LUA_TTABLE);
+	return (EventType)LuaReadIntegerField(lua, tableIndex, "eventType", 0, true);
+}
+
 int LuaApi::RegisterMemoryCallback(lua_State* lua)
 {
 	LuaCallHelper l(lua);
@@ -616,6 +669,26 @@ int LuaApi::RegisterMemoryCallback(lua_State* lua)
 	return l.ReturnCount();
 }
 
+int LuaApi::RegisterMemoryPayloadCallback(lua_State* lua)
+{
+	errorCond(lua_gettop(lua) != 2, "memory payload callback registration expects an options table and a callback function");
+	LuaMemoryCallbackOptions options = LuaReadMemoryCallbackOptions(lua, 1, _context->GetDefaultMemType(), _context->GetDefaultCpuType());
+	errorCond(options.StartAddress < 0, "start address must be >= 0");
+	errorCond(options.StartAddress > options.EndAddress, "start address must be <= end address");
+	checkEnum(CallbackType, options.Callback, "invalid callback type");
+	checkEnum(MemoryType, options.Mem, "invalid memory type");
+	checkEnum(CpuType, options.Cpu, "invalid cpu type");
+	errorCond(!lua_isfunction(lua, 2), "callback function could not be found");
+
+	lua_pushvalue(lua, 2);
+	int reference = luaL_ref(lua, LUA_REGISTRYINDEX);
+	errorCond(reference == LUA_NOREF, "callback function could not be found");
+	_context->RegisterMemoryCallback(options.Callback, options.StartAddress, options.EndAddress, options.Mem, options.Cpu, reference, true);
+	_context->Log("Registered memory callback from $" + HexUtilities::ToHex((uint32_t)options.StartAddress) + " to $" + HexUtilities::ToHex((uint32_t)options.EndAddress));
+	lua_pushinteger(lua, reference);
+	return 1;
+}
+
 int LuaApi::UnregisterMemoryCallback(lua_State* lua)
 {
 	LuaCallHelper l(lua);
@@ -645,6 +718,21 @@ int LuaApi::UnregisterMemoryCallback(lua_State* lua)
 	return l.ReturnCount();
 }
 
+int LuaApi::UnregisterMemoryPayloadCallback(lua_State* lua)
+{
+	errorCond(lua_gettop(lua) != 2, "memory payload callback removal expects an options table and callback reference");
+	LuaMemoryCallbackOptions options = LuaReadMemoryCallbackOptions(lua, 1, _context->GetDefaultMemType(), _context->GetDefaultCpuType());
+	int reference = (int)luaL_checkinteger(lua, 2);
+	errorCond(options.StartAddress < 0, "start address must be >= 0");
+	errorCond(options.StartAddress > options.EndAddress, "start address must be <= end address");
+	checkEnum(CallbackType, options.Callback, "invalid callback type");
+	checkEnum(MemoryType, options.Mem, "invalid memory type");
+	checkEnum(CpuType, options.Cpu, "invalid cpu type");
+	errorCond(reference == LUA_NOREF, "callback function could not be found");
+	_context->UnregisterMemoryCallback(options.Callback, options.StartAddress, options.EndAddress, options.Mem, options.Cpu, reference);
+	return 0;
+}
+
 int LuaApi::RegisterEventCallback(lua_State* lua)
 {
 	LuaCallHelper l(lua);
@@ -658,6 +746,20 @@ int LuaApi::RegisterEventCallback(lua_State* lua)
 	return l.ReturnCount();
 }
 
+int LuaApi::RegisterEventPayloadCallback(lua_State* lua)
+{
+	errorCond(lua_gettop(lua) != 2, "event payload callback registration expects an options table and a callback function");
+	EventType type = LuaReadEventCallbackOptions(lua, 1);
+	checkEnum(EventType, type, "invalid event type");
+	errorCond(!lua_isfunction(lua, 2), "callback function could not be found");
+	lua_pushvalue(lua, 2);
+	int reference = luaL_ref(lua, LUA_REGISTRYINDEX);
+	errorCond(reference == LUA_NOREF, "callback function could not be found");
+	_context->RegisterEventCallback(type, reference, true);
+	lua_pushinteger(lua, reference);
+	return 1;
+}
+
 int LuaApi::UnregisterEventCallback(lua_State* lua)
 {
 	LuaCallHelper l(lua);
@@ -669,6 +771,17 @@ int LuaApi::UnregisterEventCallback(lua_State* lua)
 	errorCond(reference == LUA_NOREF, "callback function could not be found");
 	_context->UnregisterEventCallback(type, reference);
 	return l.ReturnCount();
+}
+
+int LuaApi::UnregisterEventPayloadCallback(lua_State* lua)
+{
+	errorCond(lua_gettop(lua) != 2, "event payload callback removal expects an options table and callback reference");
+	EventType type = LuaReadEventCallbackOptions(lua, 1);
+	int reference = (int)luaL_checkinteger(lua, 2);
+	checkEnum(EventType, type, "invalid event type");
+	errorCond(reference == LUA_NOREF, "callback function could not be found");
+	_context->UnregisterEventCallback(type, reference);
+	return 0;
 }
 
 int LuaApi::MeasureString(lua_State* lua)

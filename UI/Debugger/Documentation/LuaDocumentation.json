@@ -34,6 +34,26 @@
 	"returnValue": { "type": "Int", "description": "Value that can be used to remove the callback by calling emu.removeMemoryCallback()." }
 },
 {
+	"name": "addMemoryCallbackWithPayload",
+	"category": "Callbacks",
+	"description": "Registers a memory callback using an options table and calls the callback with a single payload table instead of positional address/value arguments. The payload contains address, value, callbackType, memoryType, cpuType, startAddress, endAddress, canReplaceValue, and absoluteAddress when available.\n\nIf the callback returns an integer value, it replaces the memory value, matching addMemoryCallback behavior. This function is also available as emu.callbacks.onMemory.",
+	"parameters": [
+		{ "name": "options", "type": "Table", "description": "{ callbackType = enum, startAddress = int, endAddress = int?, cpuType = enum?, memoryType = enum? }" },
+		{ "name": "callback", "type": "Function", "description": "Lua function called with one payload table" }
+	],
+	"returnValue": { "type": "Int", "description": "Value that can be used to remove the callback by calling emu.removeMemoryCallbackWithPayload() or emu.callbacks.offMemory()." }
+},
+{
+	"name": "addEventCallbackWithPayload",
+	"category": "Callbacks",
+	"description": "Registers an event callback using an options table and calls the callback with a single payload table instead of the positional cpuType argument. The payload contains eventType and cpuType. This function is also available as emu.callbacks.onEvent.",
+	"parameters": [
+		{ "name": "options", "type": "Table", "description": "{ eventType = enum }" },
+		{ "name": "callback", "type": "Function", "description": "Lua function called with one payload table" }
+	],
+	"returnValue": { "type": "Int", "description": "Value that can be used to remove the callback by calling emu.removeEventCallbackWithPayload() or emu.callbacks.offEvent()." }
+},
+{
 	"name": "breakExecution",
 	"category": "Emulation",
 	"description": "Breaks the execution."
@@ -583,6 +603,24 @@
 		{ "name": "signed", "type": "Bool", "description": "When true, the return value is a 32-bit signed value." }
 	],
 	"returnValue": { "type": "Int", "description": "A 32-bit (signed or unsigned) value." }
+},
+{
+	"name": "removeMemoryCallbackWithPayload",
+	"category": "Callbacks",
+	"description": "Removes a memory payload callback registered with emu.addMemoryCallbackWithPayload() or emu.callbacks.onMemory(). The options table must match the registration options used when adding the callback.",
+	"parameters": [
+		{ "name": "options", "type": "Table", "description": "{ callbackType = enum, startAddress = int, endAddress = int?, cpuType = enum?, memoryType = enum? }" },
+		{ "name": "reference", "type": "Int", "description": "Reference returned by addMemoryCallbackWithPayload" }
+	]
+},
+{
+	"name": "removeEventCallbackWithPayload",
+	"category": "Callbacks",
+	"description": "Removes an event payload callback registered with emu.addEventCallbackWithPayload() or emu.callbacks.onEvent().",
+	"parameters": [
+		{ "name": "options", "type": "Table", "description": "{ eventType = enum }" },
+		{ "name": "reference", "type": "Int", "description": "Reference returned by addEventCallbackWithPayload" }
+	]
 },
 {
 	"name": "reset",

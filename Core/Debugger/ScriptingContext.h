@@ -23,6 +23,13 @@ struct MemoryCallback
 	CpuType Cpu;
 	MemoryType MemType;
 	int Reference;
+	bool UseTablePayload;
+};
+
+struct EventCallback
+{
+	int Reference;
+	bool UseTablePayload;
 };
 
 enum class ScriptDrawSurface
@@ -60,7 +67,7 @@ protected:
 	bool _initDone = false;
 
 	vector<MemoryCallback> _callbacks[3];
-	vector<int> _eventCallbacks[(int)EventType::LastValue + 1];
+	vector<EventCallback> _eventCallbacks[(int)EventType::LastValue + 1];
 
 	template<typename T> void InternalCallMemoryCallback(AddressInfo relAddr, T& value, CallbackType type, CpuType cpuType);
 
@@ -90,8 +97,8 @@ public:
 
 	void RefreshMemoryCallbackFlags();
 
-	void RegisterMemoryCallback(CallbackType type, int startAddr, int endAddr, MemoryType memType, CpuType cpuType, int reference);
+	void RegisterMemoryCallback(CallbackType type, int startAddr, int endAddr, MemoryType memType, CpuType cpuType, int reference, bool useTablePayload = false);
 	void UnregisterMemoryCallback(CallbackType type, int startAddr, int endAddr, MemoryType memType, CpuType cpuType, int reference);
-	void RegisterEventCallback(EventType type, int reference);
+	void RegisterEventCallback(EventType type, int reference, bool useTablePayload = false);
 	void UnregisterEventCallback(EventType type, int reference);
 };

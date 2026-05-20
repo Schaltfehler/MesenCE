@@ -38,8 +38,8 @@ ScriptingContext::~ScriptingContext()
 		}
 
 		for(auto& entry : magic_enum::enum_entries<EventType>()) {
-			for(int& ref : _eventCallbacks[(int)entry.first]) {
-				references.emplace(ref);
+			for(EventCallback& callback : _eventCallbacks[(int)entry.first]) {
+				references.emplace(callback.Reference);
 			}
 		}
 
@@ -269,7 +269,7 @@ bool ScriptingContext::IsSaveStateAllowed()
 	return _allowSaveState;
 }
 
-void ScriptingContext::RegisterMemoryCallback(CallbackType type, int startAddr, int endAddr, MemoryType memType, CpuType cpuType, int reference)
+void ScriptingContext::RegisterMemoryCallback(CallbackType type, int startAddr, int endAddr, MemoryType memType, CpuType cpuType, int reference, bool useTablePayload)
 {
 	if(endAddr < startAddr) {
 		return;
@@ -281,6 +281,7 @@ void ScriptingContext::RegisterMemoryCallback(CallbackType type, int startAddr, 
 	callback.Reference = reference;
 	callback.Cpu = cpuType;
 	callback.MemType = memType;
+	callback.UseTablePayload = useTablePayload;
 
 	if(DebugUtilities::IsPpuMemory(memType)) {
 		_debugger->GetScriptManager()->EnablePpuMemoryCallbacks();
@@ -328,15 +329,15 @@ void ScriptingContext::UnregisterMemoryCallback(CallbackType type, int startAddr
 	luaL_unref(_lua, LUA_REGISTRYINDEX, reference);
 }
 
-void ScriptingContext::RegisterEventCallback(EventType type, int reference)
+void ScriptingContext::RegisterEventCallback(EventType type, int reference, bool useTablePayload)
 {
-	_eventCallbacks[(int)type].push_back(reference);
+	_eventCallbacks[(int)type].push_back({ reference, useTablePayload });
 }
 
 void ScriptingContext::UnregisterEventCallback(EventType type, int reference)
 {
-	vector<int>& callbacks = _eventCallbacks[(int)type];
-	callbacks.erase(std::remove(callbacks.begin(), callbacks.end(), reference), callbacks.end());
+	vector<EventCallback>& callbacks = _eventCallbacks[(int)type];
+	callbacks.erase(std::remove_if(callbacks.begin(), callbacks.end(), [reference](EventCallback& callback) { return callback.Reference == reference; }), callbacks.end());
 	luaL_unref(_lua, LUA_REGISTRYINDEX, reference);
 }
 
@@ -378,9 +379,30 @@ void ScriptingContext::InternalCallMemoryCallback(AddressInfo relAddr, T& value,
 
 		int top = lua_gettop(_lua);
 		lua_rawgeti(_lua, LUA_REGISTRYINDEX, callback.Reference);
-		lua_pushinteger(_lua, relAddr.Address);
-		lua_pushinteger(_lua, value);
-		if(lua_pcall(_lua, 2, LUA_MULTRET, 0) != 0) {
+		if(callback.UseTablePayload) {
+			lua_newtable(_lua);
+			lua_pushliteral(_lua, "address"); lua_pushinteger(_lua, relAddr.Address); lua_settable(_lua, -3);
+			lua_pushliteral(_lua, "value"); lua_pushinteger(_lua, value); lua_settable(_lua, -3);
+			lua_pushliteral(_lua, "callbackType"); lua_pushinteger(_lua, (int)type); lua_settable(_lua, -3);
+			lua_pushliteral(_lua, "memoryType"); lua_pushinteger(_lua, (int)callback.MemType); lua_settable(_lua, -3);
+			lua_pushliteral(_lua, "cpuType"); lua_pushinteger(_lua, (int)cpuType); lua_settable(_lua, -3);
+			lua_pushliteral(_lua, "startAddress"); lua_pushinteger(_lua, callback.StartAddress); lua_settable(_lua, -3);
+			lua_pushliteral(_lua, "endAddress"); lua_pushinteger(_lua, callback.EndAddress); lua_settable(_lua, -3);
+			lua_pushliteral(_lua, "canReplaceValue"); lua_pushboolean(_lua, 1); lua_settable(_lua, -3);
+
+			AddressInfo absoluteAddress = _debugger->GetAbsoluteAddress(relAddr);
+			if(absoluteAddress.Address >= 0) {
+				lua_pushliteral(_lua, "absoluteAddress");
+				lua_newtable(_lua);
+				lua_pushliteral(_lua, "address"); lua_pushinteger(_lua, absoluteAddress.Address); lua_settable(_lua, -3);
+				lua_pushliteral(_lua, "memoryType"); lua_pushinteger(_lua, (int)absoluteAddress.Type); lua_settable(_lua, -3);
+				lua_settable(_lua, -3);
+			}
+		} else {
+			lua_pushinteger(_lua, relAddr.Address);
+			lua_pushinteger(_lua, value);
+		}
+		if(lua_pcall(_lua, callback.UseTablePayload ? 1 : 2, LUA_MULTRET, 0) != 0) {
 			ProcessLuaError();
 		} else {
 			int returnParamCount = lua_gettop(_lua) - top;
@@ -404,9 +426,15 @@ int ScriptingContext::CallEventCallback(EventType type, CpuType cpuType)
 	lua_setwatchdogtimer(_lua, ScriptingContext::ExecutionCountHook, 1000);
 	LuaApi::SetContext(this);
 	LuaCallHelper l(_lua);
-	for(int& ref : _eventCallbacks[(int)type]) {
-		lua_rawgeti(_lua, LUA_REGISTRYINDEX, ref);
-		lua_pushinteger(_lua, (int)cpuType);
+	for(EventCallback& callback : _eventCallbacks[(int)type]) {
+		lua_rawgeti(_lua, LUA_REGISTRYINDEX, callback.Reference);
+		if(callback.UseTablePayload) {
+			lua_newtable(_lua);
+			lua_pushliteral(_lua, "eventType"); lua_pushinteger(_lua, (int)type); lua_settable(_lua, -3);
+			lua_pushliteral(_lua, "cpuType"); lua_pushinteger(_lua, (int)cpuType); lua_settable(_lua, -3);
+		} else {
+			lua_pushinteger(_lua, (int)cpuType);
+		}
 		if(lua_pcall(_lua, 1, 0, 0) != 0) {
 			ProcessLuaError();
 		}
