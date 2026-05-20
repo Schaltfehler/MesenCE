@@ -386,7 +386,7 @@
 	"name": "decodeInstructions",
 	"category": "Miscellaneous",
 	"subcategory": "Disassembly",
-	"description": "Decodes a bounded sequence of instructions and returns structured instruction facts rather than debugger row text. The options table accepts cpuType, address, count, memoryType, cpuFlags and includePresentation. Each result includes address, absoluteAddress when mapped, cpuType, opcode, opSize, flags, byteCode, basic control-flow booleans, controlFlowKind, fallthroughAddress and provenance.\n\nContract note: this is a structured decode surface backed by the debugger disassembler. If includePresentation is true, formatted disassembly text is included under a nested presentation table and should not be treated as the stable fact contract. This function is also available as emu.disassembly.decode.",
+	"description": "Decodes a bounded sequence of instructions and returns structured instruction facts rather than debugger row text. The options table accepts cpuType, address, count, memoryType, cpuFlags and includePresentation. Each result includes address, absoluteAddress when mapped, cpuType, opcode, opSize, flags, byteCode, basic control-flow booleans, controlFlowKind, nextLinearAddress, fallthroughAddress when applicable, and provenance.\n\nContract note: this is a structured decode surface backed by the debugger disassembler. If includePresentation is true, formatted disassembly text is included under a nested presentation table and should not be treated as the stable fact contract. This function is also available as emu.disassembly.decode.",
 	"parameters": [
 		{ "name": "options", "type": "Table", "description": "{ cpuType = enum?, address = int, count = int?, memoryType = enum?, cpuFlags = int?, includePresentation = bool? }" }
 	],

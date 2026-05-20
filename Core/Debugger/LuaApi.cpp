@@ -1994,10 +1994,18 @@ static void LuaPushDisassemblyDecode(lua_State* lua, DisassemblyInfo& info, CpuT
 	lua_pushboolvalue(isUnconditionalJump, info.IsUnconditionalJump());
 	lua_pushboolvalue(isJumpToSub, info.IsJumpToSub());
 	lua_pushboolvalue(isReturnInstruction, info.IsReturnInstruction());
+	bool isReturn = info.IsReturnInstruction();
+	bool isCall = info.IsJumpToSub();
+	bool isJump = info.IsJump();
+	bool isUnconditionalJump = info.IsUnconditionalJump();
+	uint32_t nextLinearAddress = address + info.GetOpSize();
 	lua_pushliteral(lua, "controlFlowKind");
-	lua_pushstring(lua, info.IsReturnInstruction() ? "return" : (info.IsJumpToSub() ? "call" : (info.IsJump() ? "jump" : "fallthrough")));
+	lua_pushstring(lua, isReturn ? "return" : (isCall ? "call" : (isJump ? "jump" : "fallthrough")));
 	lua_settable(lua, -3);
-	lua_pushliteral(lua, "fallthroughAddress"); lua_pushinteger(lua, address + info.GetOpSize()); lua_settable(lua, -3);
+	lua_pushliteral(lua, "nextLinearAddress"); lua_pushinteger(lua, nextLinearAddress); lua_settable(lua, -3);
+	if(!isReturn && !isUnconditionalJump) {
+		lua_pushliteral(lua, "fallthroughAddress"); lua_pushinteger(lua, nextLinearAddress); lua_settable(lua, -3);
+	}
 
 	lua_pushliteral(lua, "byteCode");
 	lua_newtable(lua);
