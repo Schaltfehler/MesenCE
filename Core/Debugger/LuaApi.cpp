@@ -114,6 +114,14 @@ void LuaApi::LuaPushIntValue(lua_State* lua, string name, int value)
 	lua_settable(lua, -3);
 }
 
+static void LuaPushSubLibrary(lua_State* lua, const char* name, const luaL_Reg functions[])
+{
+	lua_pushstring(lua, name);
+	lua_newtable(lua);
+	luaL_setfuncs(lua, functions, 0);
+	lua_settable(lua, -3);
+}
+
 int LuaApi::GetLibrary(lua_State* lua)
 {
 	static const luaL_Reg apilib[] = {
@@ -223,7 +231,127 @@ int LuaApi::GetLibrary(lua_State* lua)
 		{ NULL, NULL }
 	};
 
+	static const luaL_Reg memoryLib[] = {
+		{ "getSize", LuaApi::GetMemorySize },
+		{ "read", LuaApi::ReadMemory },
+		{ "write", LuaApi::WriteMemory },
+		{ "read16", LuaApi::ReadMemory16 },
+		{ "write16", LuaApi::WriteMemory16 },
+		{ "read32", LuaApi::ReadMemory32 },
+		{ "write32", LuaApi::WriteMemory32 },
+		{ "convertAddress", LuaApi::ConvertAddress },
+		{ "getLabelAddress", LuaApi::GetLabelAddress },
+		{ NULL, NULL }
+	};
+
+	static const luaL_Reg callbacksLib[] = {
+		{ "addMemory", LuaApi::RegisterMemoryCallback },
+		{ "removeMemory", LuaApi::UnregisterMemoryCallback },
+		{ "addEvent", LuaApi::RegisterEventCallback },
+		{ "removeEvent", LuaApi::UnregisterEventCallback },
+		{ NULL, NULL }
+	};
+
+	static const luaL_Reg coverageLib[] = {
+		{ "getAccessCounters", LuaApi::GetAccessCounters },
+		{ "getAccessCountersRange", LuaApi::GetAccessCountersRange },
+		{ "getAccessCounterRows", LuaApi::GetAccessCounterRows },
+		{ "getAccessSummary", LuaApi::GetAccessSummary },
+		{ "resetAccessCounters", LuaApi::ResetAccessCounters },
+		{ "getCdlData", LuaApi::GetCdlData },
+		{ "getCdlDataRange", LuaApi::GetCdlDataRange },
+		{ "getCdlRows", LuaApi::GetCdlRows },
+		{ "getCdlSummary", LuaApi::GetCdlSummary },
+		{ "getCdlFunctions", LuaApi::GetCdlFunctions },
+		{ "resetCdl", LuaApi::ResetCdl },
+		{ NULL, NULL }
+	};
+
+	static const luaL_Reg traceLib[] = {
+		{ "getRows", LuaApi::GetTraceRows },
+		{ "getSize", LuaApi::GetTraceSize },
+		{ "clear", LuaApi::ClearTrace },
+		{ "setOptions", LuaApi::SetTraceOptions },
+		{ "startLoggerFile", LuaApi::StartTraceLoggerFile },
+		{ "flushLoggerFile", LuaApi::FlushTraceLoggerFile },
+		{ "stopLoggerFile", LuaApi::StopTraceLoggerFile },
+		{ NULL, NULL }
+	};
+
+	static const luaL_Reg controlFlowLib[] = {
+		{ "getDebuggerFeatures", LuaApi::GetDebuggerFeatures },
+		{ "getInstructionProgress", LuaApi::GetInstructionProgress },
+		{ "getCallstack", LuaApi::GetCallstack },
+		{ "getProfilerData", LuaApi::GetProfilerData },
+		{ "resetProfiler", LuaApi::ResetProfiler },
+		{ NULL, NULL }
+	};
+
+	static const luaL_Reg disassemblyLib[] = {
+		{ "getRows", LuaApi::GetDisassemblyRows },
+		{ "getRowAddress", LuaApi::GetDisassemblyRowAddress },
+		{ "search", LuaApi::SearchDisassembly },
+		{ "findOccurrences", LuaApi::FindDisassemblyOccurrences },
+		{ NULL, NULL }
+	};
+
+	static const luaL_Reg stateLib[] = {
+		{ "createSavestate", LuaApi::CreateSavestate },
+		{ "loadSavestate", LuaApi::LoadSavestate },
+		{ "get", LuaApi::GetState },
+		{ "set", LuaApi::SetState },
+		{ "getCpu", LuaApi::GetCpuState },
+		{ "setCpu", LuaApi::SetCpuState },
+		{ NULL, NULL }
+	};
+
+	static const luaL_Reg uiLib[] = {
+		{ "measureString", LuaApi::MeasureString },
+		{ "drawString", LuaApi::DrawString },
+		{ "drawPixel", LuaApi::DrawPixel },
+		{ "drawLine", LuaApi::DrawLine },
+		{ "drawRectangle", LuaApi::DrawRectangle },
+		{ "clearScreen", LuaApi::ClearScreen },
+		{ "getScreenSize", LuaApi::GetScreenSize },
+		{ "getDrawSurfaceSize", LuaApi::GetDrawSurfaceSize },
+		{ "getScreenBuffer", LuaApi::GetScreenBuffer },
+		{ "setScreenBuffer", LuaApi::SetScreenBuffer },
+		{ "getPixel", LuaApi::GetPixel },
+		{ "selectDrawSurface", LuaApi::SelectDrawSurface },
+		{ "getMouseState", LuaApi::GetMouseState },
+		{ "isKeyPressed", LuaApi::IsKeyPressed },
+		{ "getInput", LuaApi::GetInput },
+		{ "setInput", LuaApi::SetInput },
+		{ "displayMessage", LuaApi::DisplayMessage },
+		{ "takeScreenshot", LuaApi::TakeScreenshot },
+		{ NULL, NULL }
+	};
+
+	static const luaL_Reg runtimeLib[] = {
+		{ "getRomInfo", LuaApi::GetRomInfo },
+		{ "getCpuCycleCount", LuaApi::GetCpuCycleCount },
+		{ "getMasterClock", LuaApi::GetMasterClock },
+		{ "getScriptDataFolder", LuaApi::GetScriptDataFolder },
+		{ NULL, NULL }
+	};
+
+	static const luaL_Reg diagnosticsLib[] = {
+		{ "log", LuaApi::Log },
+		{ "getLog", LuaApi::GetLogWindowLog },
+		{ NULL, NULL }
+	};
+
 	luaL_newlib(lua, apilib);
+	LuaPushSubLibrary(lua, "memory", memoryLib);
+	LuaPushSubLibrary(lua, "callbacks", callbacksLib);
+	LuaPushSubLibrary(lua, "coverage", coverageLib);
+	LuaPushSubLibrary(lua, "trace", traceLib);
+	LuaPushSubLibrary(lua, "controlFlow", controlFlowLib);
+	LuaPushSubLibrary(lua, "disassembly", disassemblyLib);
+	LuaPushSubLibrary(lua, "state", stateLib);
+	LuaPushSubLibrary(lua, "ui", uiLib);
+	LuaPushSubLibrary(lua, "runtime", runtimeLib);
+	LuaPushSubLibrary(lua, "diagnostics", diagnosticsLib);
 
 	//Expose MemoryType enum as "emu.memType"
 	lua_pushliteral(lua, "memType");
