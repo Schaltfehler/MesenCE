@@ -251,6 +251,21 @@ string ScriptingContext::GetScriptName()
 	return _scriptName;
 }
 
+uint32_t ScriptingContext::GetScriptTimeout()
+{
+	return _settings->GetDebugConfig().ScriptTimeout;
+}
+
+bool ScriptingContext::IsIoOsAccessAllowed()
+{
+	return _settings->GetDebugConfig().ScriptAllowIoOsAccess;
+}
+
+bool ScriptingContext::IsNetworkAccessAllowed()
+{
+	return _settings->GetDebugConfig().ScriptAllowNetworkAccess;
+}
+
 template<typename T>
 void ScriptingContext::CallMemoryCallback(AddressInfo relAddr, T& value, CallbackType type, CpuType cpuType)
 {

@@ -26,6 +26,7 @@ public:
 	static int SelectDrawSurface(lua_State* lua);
 
 	static int GetMemorySize(lua_State* lua);
+	static int GetMemoryRegions(lua_State* lua);
 
 	static int ReadMemory(lua_State* lua);
 	static int WriteMemory(lua_State* lua);
@@ -87,6 +88,8 @@ public:
 
 	static int GetScriptDataFolder(lua_State* lua);
 	static int GetRomInfo(lua_State* lua);
+	static int GetScriptInfo(lua_State* lua);
+	static int GetRuntimeCapabilities(lua_State* lua);
 	static int GetLogWindowLog(lua_State* lua);
 
 	static void GenerateStateTable(Serializer& s, lua_State* lua);
@@ -129,6 +132,7 @@ public:
 	static int ResetProfiler(lua_State* lua);
 
 	static int GetDisassemblyRows(lua_State* lua);
+	static int DecodeInstructions(lua_State* lua);
 	static int GetDisassemblyRowAddress(lua_State* lua);
 	static int SearchDisassembly(lua_State* lua);
 	static int FindDisassemblyOccurrences(lua_State* lua);
