@@ -248,7 +248,7 @@
 	"name": "getTraceRows",
 	"category": "Miscellaneous",
 	"subcategory": "Trace",
-	"description": "Returns a 1-indexed array of tables describing rows from the in-memory execution trace, starting at startOffset (0 = most recent). Each row contains \"rowId\" (a stable identifier across the trace), \"programCounter\", \"cpuType\", \"byteCodeSize\", \"logSize\", a \"timing\" sub-table (frameCount, scanline, cycle, hClock, cycleCount), the formatted \"log\" string, and a \"byteCode\" array. The row count is capped at 100000.\n\nNote: only rows whose CPU has trace logging currently enabled (via setTraceOptions) are returned. Disabled CPUs contribute no rows even if their ring buffer still holds data.",
+	"description": "Returns a 1-indexed array of tables describing rows from the in-memory execution trace, starting at startOffset (0 = most recent). Each row contains \"rowId\" (a stable identifier across the trace), \"programCounter\", \"cpuType\", \"byteCodeSize\", \"logSize\", a \"timing\" sub-table (frameCount, scanline, cycle, hClock, cycleCount), the formatted \"log\" string, and a \"byteCode\" array. The row count is capped at 100000.\n\nContract note: timing, CPU, program counter and byteCode fields are structured debugger trace facts; \"log\" is formatted trace text and should not be treated as a stable parser target. This function is also available as emu.trace.getRows.\n\nNote: only rows whose CPU has trace logging currently enabled (via setTraceOptions) are returned. Disabled CPUs contribute no rows even if their ring buffer still holds data.",
 	"parameters": [
 		{ "name": "startOffset", "type": "Int", "description": "Offset into the trace (0 = most recent row)" },
 		{ "name": "maxRowCount", "type": "Int", "description": "Maximum number of rows to return" }
@@ -354,7 +354,7 @@
 	"name": "getDisassemblyRows",
 	"category": "Miscellaneous",
 	"subcategory": "Disassembly",
-	"description": "Returns a 1-indexed array of tables describing disassembled rows starting at the given address. Each row contains \"address\", \"absoluteAddress\", \"opSize\", \"flags\", \"effectiveAddress\", \"value\", \"lineCpuType\", \"byteCode\", \"text\" and \"comment\". The row count is capped at 10000.\n\nNote: the disassembler is populated lazily as code executes, so freshly loaded regions can return zero rows until they have run.",
+	"description": "Returns a 1-indexed array of tables describing debugger disassembly rows starting at the given address. Each row contains structured fields (\"address\", \"absoluteAddress\", \"opSize\", \"flags\", \"effectiveAddress\", \"value\", \"lineCpuType\", \"byteCode\") and presentation-adjacent fields (\"text\" and \"comment\"). The row count is capped at 10000.\n\nContract note: this is a debugger row/view-shaped API. Scripts should prefer structured fields for automation and avoid parsing \"text\" or \"comment\" unless they explicitly want debugger presentation text. This function is also available as emu.disassembly.getRows.\n\nNote: the disassembler is populated lazily as code executes, so freshly loaded regions can return zero rows until they have run.",
 	"parameters": [
 		{ "name": "cpuType", "type": "Enum", "enumName": "cpuType", "description": "CPU type" },
 		{ "name": "startAddress", "type": "Int", "description": "Address of the first row to return" },
@@ -366,7 +366,7 @@
 	"name": "getDisassemblyRowAddress",
 	"category": "Miscellaneous",
 	"subcategory": "Disassembly",
-	"description": "Returns the address that corresponds to a row offset relative to the row containing the given address. Useful for stepping through the disassembly view by row count.",
+	"description": "Returns the address of the disassembly row at rowOffset relative to address for the selected CPU.\n\nContract note: this is debugger row-navigation semantics, not a raw instruction-decode fact. This function is also available as emu.disassembly.getRowAddress.",
 	"parameters": [
 		{ "name": "cpuType", "type": "Enum", "enumName": "cpuType", "description": "CPU type" },
 		{ "name": "address", "type": "Int", "description": "Address contained in the reference row" },
@@ -378,7 +378,7 @@
 	"name": "searchDisassembly",
 	"category": "Miscellaneous",
 	"subcategory": "Disassembly",
-	"description": "Searches the disassembly for the given string starting at startAddress and returns the address of the first match, or nil if no match is found. The optional options table accepts \"matchCase\", \"matchWholeWord\", \"searchBackwards\" and \"skipFirstLine\" booleans, mirroring the debugger UI search.",
+	"description": "Searches debugger disassembly rows for searchString and returns the matching address, or nil when no match is found.\n\nContract note: this searches debugger row output and is therefore view-shaped. Prefer future structured decode/search APIs for stable automation when available. This function is also available as emu.disassembly.search.",
 	"parameters": [
 		{ "name": "cpuType", "type": "Enum", "enumName": "cpuType", "description": "CPU type" },
 		{ "name": "searchString", "type": "String", "description": "Text to search for" },
@@ -391,7 +391,7 @@
 	"name": "findDisassemblyOccurrences",
 	"category": "Miscellaneous",
 	"subcategory": "Disassembly",
-	"description": "Searches the disassembly for the given string and returns a 1-indexed array of disassembly rows for every match. Each row has the same shape as the rows returned by getDisassemblyRows. The result count is capped at 10000.",
+	"description": "Finds up to maxResultCount debugger disassembly row occurrences matching searchString and returns row tables.\n\nContract note: returned rows have the same mixed structured/presentation contract as getDisassemblyRows. This function is also available as emu.disassembly.findOccurrences.",
 	"parameters": [
 		{ "name": "cpuType", "type": "Enum", "enumName": "cpuType", "description": "CPU type" },
 		{ "name": "searchString", "type": "String", "description": "Text to search for" },
@@ -449,8 +449,8 @@
 {
 	"name": "getLogWindowLog",
 	"category": "Logging",
-	"description": "Returns the same text as what is shown in the emulator's log window.",
-	"returnValue": { "type": "String", "description": "A string containing the log shown in the log window" }
+	"description": "Returns diagnostic log text from the emulator message/log manager.\n\nContract note: this is diagnostic text, not a structured event stream and not a stable parser target. Prefer the grouped alias emu.diagnostics.getLog for new scripts; this flat name is kept for compatibility with the existing log-window-oriented API.",
+	"returnValue": { "type": "String", "description": "Diagnostic log text from the emulator message/log manager" }
 },
 {
 	"name": "getMasterClock",
