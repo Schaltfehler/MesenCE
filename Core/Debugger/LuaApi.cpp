@@ -490,14 +490,10 @@ int LuaApi::GetMemoryRegions(lua_State* lua)
 		lua_pushboolvalue(isCartRom, DebugUtilities::IsCartRom(memoryType));
 		lua_pushboolvalue(isVolatileRam, DebugUtilities::IsVolatileRam(memoryType));
 
-		try {
-			CpuType cpuType = DebugUtilities::ToCpuType(memoryType);
-			lua_pushintvalue(cpuType, (int)cpuType);
-			LuaPushEnumName(lua, "cpuName", cpuType);
-			lua_pushboolvalue(cpuAvailable, _debugger->HasCpuType(cpuType));
-		} catch(...) {
-			lua_pushboolvalue(cpuAvailable, false);
-		}
+		CpuType cpuType = DebugUtilities::ToCpuType(memoryType);
+		lua_pushintvalue(cpuType, (int)cpuType);
+		LuaPushEnumName(lua, "cpuName", cpuType);
+		lua_pushboolvalue(cpuAvailable, _debugger->HasCpuType(cpuType));
 
 		lua_rawseti(lua, -2, outputIndex++);
 	}
@@ -1980,6 +1976,18 @@ static void LuaPushDecodeProvenance(lua_State* lua, const char* source, const ch
 	lua_settable(lua, -3);
 }
 
+static DisassemblyInfo LuaDecodeInstruction(Debugger* debugger, MemoryDumper* memoryDumper, CpuType cpuType, uint32_t address, uint8_t flags, MemoryType memoryType, AddressInfo& absoluteAddress)
+{
+	AddressInfo sourceAddress { (int32_t)address, memoryType };
+	if(DebugUtilities::IsRelativeMemory(memoryType)) {
+		absoluteAddress = debugger->GetAbsoluteAddress(sourceAddress);
+		return debugger->GetDisassembler()->GetDisassemblyInfo(absoluteAddress, address, flags, cpuType);
+	}
+
+	absoluteAddress = sourceAddress;
+	return DisassemblyInfo(address, flags, cpuType, memoryType, memoryDumper);
+}
+
 static void LuaPushDisassemblyDecode(lua_State* lua, DisassemblyInfo& info, CpuType cpuType, uint32_t address, AddressInfo absoluteAddress, bool includePresentation, const char* cpuFlagsSource, LabelManager* labelManager, EmuSettings* settings)
 {
 	lua_newtable(lua);
@@ -1989,7 +1997,7 @@ static void LuaPushDisassemblyDecode(lua_State* lua, DisassemblyInfo& info, CpuT
 	}
 	lua_pushintvalue(cpuType, (int)cpuType);
 	LuaPushEnumName(lua, "cpuName", cpuType);
-	lua_pushliteral(lua, "status"); lua_pushstring(lua, info.IsInitialized() ? "decoded" : "decodedTransient"); lua_settable(lua, -3);
+	lua_pushliteral(lua, "status"); lua_pushstring(lua, "decoded"); lua_settable(lua, -3);
 	lua_pushintvalue(opcode, info.GetOpCode());
 	lua_pushintvalue(opSize, info.GetOpSize());
 	lua_pushintvalue(flags, info.GetFlags());
@@ -2064,10 +2072,9 @@ int LuaApi::DecodeInstructions(lua_State* lua)
 			break;
 		}
 
-		AddressInfo addressInfo { (int32_t)currentAddress, memoryType };
-		AddressInfo absoluteAddress = DebugUtilities::IsRelativeMemory(memoryType) ? _debugger->GetAbsoluteAddress(addressInfo) : addressInfo;
+		AddressInfo absoluteAddress;
 		uint8_t flags = hasCpuFlags ? cpuFlags : _debugger->GetCpuFlags(cpuType, currentAddress);
-		DisassemblyInfo info = _debugger->GetDisassembler()->GetDisassemblyInfo(absoluteAddress, currentAddress, flags, cpuType);
+		DisassemblyInfo info = LuaDecodeInstruction(_debugger, _memoryDumper, cpuType, currentAddress, flags, memoryType, absoluteAddress);
 		LuaPushDisassemblyDecode(lua, info, cpuType, currentAddress, absoluteAddress, includePresentation, hasCpuFlags ? "provided" : "debugger", _debugger->GetLabelManager(), _emu->GetSettings());
 		lua_rawseti(lua, -2, outputIndex++);
 
