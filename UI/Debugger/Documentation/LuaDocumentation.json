@@ -383,6 +383,16 @@
 	"returnValue": { "type": "Array", "description": "Array of disassembly rows" }
 },
 {
+	"name": "decodeInstructions",
+	"category": "Miscellaneous",
+	"subcategory": "Disassembly",
+	"description": "Decodes a bounded sequence of instructions and returns structured instruction facts rather than debugger row text. The options table accepts cpuType, address, count, memoryType, cpuFlags and includePresentation. Each result includes address, absoluteAddress when mapped, cpuType, opcode, opSize, flags, byteCode, basic control-flow booleans, controlFlowKind, fallthroughAddress and provenance.\n\nContract note: this is a structured decode surface backed by the debugger disassembler. If includePresentation is true, formatted disassembly text is included under a nested presentation table and should not be treated as the stable fact contract. This function is also available as emu.disassembly.decode.",
+	"parameters": [
+		{ "name": "options", "type": "Table", "description": "{ cpuType = enum?, address = int, count = int?, memoryType = enum?, cpuFlags = int?, includePresentation = bool? }" }
+	],
+	"returnValue": { "type": "Array", "description": "Array of decoded instruction fact tables" }
+},
+{
 	"name": "getDisassemblyRowAddress",
 	"category": "Miscellaneous",
 	"subcategory": "Disassembly",
@@ -488,6 +498,12 @@
 	"returnValue": { "type": "Int", "description": "Size of the specified memory type" }
 },
 {
+	"name": "getMemoryRegions",
+	"category": "MemoryAccess",
+	"description": "Returns metadata for currently available memory regions: memory type enum value/name, size, CPU owner when known, CPU availability, and mechanical classification flags such as isCpuRelative, isPpuMemory, isRom, isCartRom and isVolatileRam. This function is also available as emu.memory.getRegions.",
+	"returnValue": { "type": "Array", "description": "Array of memory region metadata tables" }
+},
+{
 	"name": "getMouseState",
 	"category": "Input",
 	"description": "Returns a table containing the position and the state of all 3 buttons.",
@@ -511,6 +527,13 @@
 	"returnValue": { "type": "Table", "description": "{ name = string, path = string, fileSha1Hash = string }" }
 },
 {
+	"name": "getRuntimeCapabilities",
+	"category": "Miscellaneous",
+	"subcategory": "Debugger",
+	"description": "Returns runtime capability metadata for the current system and script context: main CPU, console type, I/O and network permission flags, and available CPU types with their default memory types. This function is also available as emu.runtime.getCapabilities.",
+	"returnValue": { "type": "Table", "description": "Runtime capability metadata" }
+},
+{
 	"name": "getScreenBuffer",
 	"category": "Drawing",
 	"description": "Returns an array of ARGB values with the contents of the console's screen - can be used with emu.setScreenBuffer() to modify the screen's contents.\n\nNote: The size of the array varies based on the console, game, and sometimes scene. Use emu.getScreenSize() to get the screen's current dimensions.",
@@ -528,6 +551,13 @@
 	"subcategory": "Others",
 	"description": "This function returns the path to a unique folder (based on the script's filename) where the script should store its data (if any data needs to be saved). The data will be saved in subfolders inside the LuaScriptData folder in Mesen's home folder.\n\nNote: This function will return an empty string if the \"Allow access to I/O and OS functions\" option is disabled.",
 	"returnValue": { "type": "String", "description": "The folder's path" }
+},
+{
+	"name": "getScriptInfo",
+	"category": "Miscellaneous",
+	"subcategory": "Debugger",
+	"description": "Returns metadata about the current script context: scriptName, default CPU and memory type, active draw surface, I/O and network permission flags, and script timeout. This function is also available as emu.runtime.getScriptInfo.",
+	"returnValue": { "type": "Table", "description": "Script runtime metadata" }
 },
 {
 	"name": "getState",

@@ -98,6 +98,7 @@ static constexpr uint32_t MaxLuaCallstackFrames = 512;
 static constexpr uint32_t MaxLuaProfilerFunctions = 100000;
 static constexpr uint32_t MaxLuaDisassemblyRows = 10000;
 static constexpr uint32_t MaxLuaDisassemblyOccurrences = 10000;
+static constexpr uint32_t MaxLuaDecodeInstructions = 10000;
 
 void LuaApi::SetContext(ScriptingContext* context)
 {
@@ -126,6 +127,7 @@ int LuaApi::GetLibrary(lua_State* lua)
 {
 	static const luaL_Reg apilib[] = {
 		{ "getMemorySize", LuaApi::GetMemorySize },
+		{ "getMemoryRegions", LuaApi::GetMemoryRegions },
 
 		{ "read", LuaApi::ReadMemory },
 		{ "write", LuaApi::WriteMemory },
@@ -209,6 +211,7 @@ int LuaApi::GetLibrary(lua_State* lua)
 		{ "resetProfiler", LuaApi::ResetProfiler },
 
 		{ "getDisassemblyRows", LuaApi::GetDisassemblyRows },
+		{ "decodeInstructions", LuaApi::DecodeInstructions },
 		{ "getDisassemblyRowAddress", LuaApi::GetDisassemblyRowAddress },
 		{ "searchDisassembly", LuaApi::SearchDisassembly },
 		{ "findDisassemblyOccurrences", LuaApi::FindDisassemblyOccurrences },
@@ -231,12 +234,15 @@ int LuaApi::GetLibrary(lua_State* lua)
 
 		{ "getScriptDataFolder", LuaApi::GetScriptDataFolder },
 		{ "getRomInfo", LuaApi::GetRomInfo },
+		{ "getScriptInfo", LuaApi::GetScriptInfo },
+		{ "getRuntimeCapabilities", LuaApi::GetRuntimeCapabilities },
 		{ "getLogWindowLog", LuaApi::GetLogWindowLog },
 		{ NULL, NULL }
 	};
 
 	static const luaL_Reg memoryLib[] = {
 		{ "getSize", LuaApi::GetMemorySize },
+		{ "getRegions", LuaApi::GetMemoryRegions },
 		{ "read", LuaApi::ReadMemory },
 		{ "write", LuaApi::WriteMemory },
 		{ "read16", LuaApi::ReadMemory16 },
@@ -297,6 +303,7 @@ int LuaApi::GetLibrary(lua_State* lua)
 
 	static const luaL_Reg disassemblyLib[] = {
 		{ "getRows", LuaApi::GetDisassemblyRows },
+		{ "decode", LuaApi::DecodeInstructions },
 		{ "getRowAddress", LuaApi::GetDisassemblyRowAddress },
 		{ "search", LuaApi::SearchDisassembly },
 		{ "findOccurrences", LuaApi::FindDisassemblyOccurrences },
@@ -337,6 +344,8 @@ int LuaApi::GetLibrary(lua_State* lua)
 
 	static const luaL_Reg runtimeLib[] = {
 		{ "getRomInfo", LuaApi::GetRomInfo },
+		{ "getScriptInfo", LuaApi::GetScriptInfo },
+		{ "getCapabilities", LuaApi::GetRuntimeCapabilities },
 		{ "getCpuCycleCount", LuaApi::GetCpuCycleCount },
 		{ "getMasterClock", LuaApi::GetMasterClock },
 		{ "getScriptDataFolder", LuaApi::GetScriptDataFolder },
@@ -437,6 +446,62 @@ int LuaApi::GetMemorySize(lua_State* lua)
 	checkEnum(MemoryType, memType, "invalid memory type");
 	l.Return(_memoryDumper->GetMemorySize(memType));
 	return l.ReturnCount();
+}
+
+static void LuaPushEnumName(lua_State* lua, const char* fieldName, MemoryType value)
+{
+	lua_pushstring(lua, fieldName);
+	lua_pushstring(lua, string(magic_enum::enum_name<MemoryType>(value)).c_str());
+	lua_settable(lua, -3);
+}
+
+static void LuaPushEnumName(lua_State* lua, const char* fieldName, CpuType value)
+{
+	lua_pushstring(lua, fieldName);
+	lua_pushstring(lua, string(magic_enum::enum_name<CpuType>(value)).c_str());
+	lua_settable(lua, -3);
+}
+
+int LuaApi::GetMemoryRegions(lua_State* lua)
+{
+	LuaCallHelper l(lua);
+	checkparams();
+
+	lua_newtable(lua);
+	uint32_t outputIndex = 1;
+	for(auto& entry : magic_enum::enum_entries<MemoryType>()) {
+		MemoryType memoryType = entry.first;
+		if(memoryType == MemoryType::None) {
+			continue;
+		}
+
+		uint32_t size = _memoryDumper->GetMemorySize(memoryType);
+		if(size == 0) {
+			continue;
+		}
+
+		lua_newtable(lua);
+		lua_pushintvalue(memoryType, (int)memoryType);
+		LuaPushEnumName(lua, "name", memoryType);
+		lua_pushliteral(lua, "size"); lua_pushinteger(lua, size); lua_settable(lua, -3);
+		lua_pushboolvalue(isCpuRelative, DebugUtilities::IsRelativeMemory(memoryType));
+		lua_pushboolvalue(isPpuMemory, DebugUtilities::IsPpuMemory(memoryType));
+		lua_pushboolvalue(isRom, DebugUtilities::IsRom(memoryType));
+		lua_pushboolvalue(isCartRom, DebugUtilities::IsCartRom(memoryType));
+		lua_pushboolvalue(isVolatileRam, DebugUtilities::IsVolatileRam(memoryType));
+
+		try {
+			CpuType cpuType = DebugUtilities::ToCpuType(memoryType);
+			lua_pushintvalue(cpuType, (int)cpuType);
+			LuaPushEnumName(lua, "cpuName", cpuType);
+			lua_pushboolvalue(cpuAvailable, _debugger->HasCpuType(cpuType));
+		} catch(...) {
+			lua_pushboolvalue(cpuAvailable, false);
+		}
+
+		lua_rawseti(lua, -2, outputIndex++);
+	}
+	return 1;
 }
 
 int LuaApi::ReadMemory(lua_State* lua)
@@ -1878,6 +1943,135 @@ static DisassemblySearchOptions LuaReadDisassemblySearchOptions(lua_State* lua, 
 	return options;
 }
 
+static int32_t LuaReadIntegerOption(lua_State* lua, int tableIndex, const char* fieldName, int32_t defaultValue, bool required)
+{
+	lua_getfield(lua, tableIndex, fieldName);
+	if(lua_isnil(lua, -1)) {
+		lua_pop(lua, 1);
+		if(required) {
+			luaL_error(lua, (string("missing required option: ") + fieldName).c_str());
+		}
+		return defaultValue;
+	}
+	int32_t value = (int32_t)luaL_checkinteger(lua, -1);
+	lua_pop(lua, 1);
+	return value;
+}
+
+static bool LuaReadBoolOption(lua_State* lua, int tableIndex, const char* fieldName, bool defaultValue)
+{
+	lua_getfield(lua, tableIndex, fieldName);
+	if(lua_isnil(lua, -1)) {
+		lua_pop(lua, 1);
+		return defaultValue;
+	}
+	bool value = lua_toboolean(lua, -1) != 0;
+	lua_pop(lua, 1);
+	return value;
+}
+
+static void LuaPushDecodeProvenance(lua_State* lua, const char* source, const char* cpuFlagsSource, bool presentationIncluded)
+{
+	lua_pushliteral(lua, "provenance");
+	lua_newtable(lua);
+	lua_pushliteral(lua, "source"); lua_pushstring(lua, source); lua_settable(lua, -3);
+	lua_pushliteral(lua, "cpuFlagsSource"); lua_pushstring(lua, cpuFlagsSource); lua_settable(lua, -3);
+	lua_pushboolvalue(presentationIncluded, presentationIncluded);
+	lua_settable(lua, -3);
+}
+
+static void LuaPushDisassemblyDecode(lua_State* lua, DisassemblyInfo& info, CpuType cpuType, uint32_t address, AddressInfo absoluteAddress, bool includePresentation, const char* cpuFlagsSource, LabelManager* labelManager, EmuSettings* settings)
+{
+	lua_newtable(lua);
+	lua_pushintvalue(address, address);
+	if(absoluteAddress.Address >= 0) {
+		LuaPushAddressInfo(lua, "absoluteAddress", absoluteAddress);
+	}
+	lua_pushintvalue(cpuType, (int)cpuType);
+	LuaPushEnumName(lua, "cpuName", cpuType);
+	lua_pushliteral(lua, "status"); lua_pushstring(lua, info.IsInitialized() ? "decoded" : "decodedTransient"); lua_settable(lua, -3);
+	lua_pushintvalue(opcode, info.GetOpCode());
+	lua_pushintvalue(opSize, info.GetOpSize());
+	lua_pushintvalue(flags, info.GetFlags());
+	lua_pushboolvalue(canDisassembleNextOp, info.CanDisassembleNextOp());
+	lua_pushboolvalue(isJump, info.IsJump());
+	lua_pushboolvalue(isUnconditionalJump, info.IsUnconditionalJump());
+	lua_pushboolvalue(isJumpToSub, info.IsJumpToSub());
+	lua_pushboolvalue(isReturnInstruction, info.IsReturnInstruction());
+	lua_pushliteral(lua, "controlFlowKind");
+	lua_pushstring(lua, info.IsReturnInstruction() ? "return" : (info.IsJumpToSub() ? "call" : (info.IsJump() ? "jump" : "fallthrough")));
+	lua_settable(lua, -3);
+	lua_pushliteral(lua, "fallthroughAddress"); lua_pushinteger(lua, address + info.GetOpSize()); lua_settable(lua, -3);
+
+	lua_pushliteral(lua, "byteCode");
+	lua_newtable(lua);
+	uint8_t byteCode[8] = {};
+	info.GetByteCode(byteCode);
+	for(uint32_t i = 0; i < info.GetOpSize() && i < sizeof(byteCode); i++) {
+		lua_pusharrayvalue(i + 1, byteCode[i]);
+	}
+	lua_settable(lua, -3);
+
+	if(includePresentation) {
+		string text;
+		info.GetDisassembly(text, address, labelManager, settings);
+		lua_pushliteral(lua, "presentation");
+		lua_newtable(lua);
+		lua_pushliteral(lua, "text"); lua_pushstring(lua, text.c_str()); lua_settable(lua, -3);
+		lua_settable(lua, -3);
+	}
+
+	LuaPushDecodeProvenance(lua, "debugger-disassembler", cpuFlagsSource, includePresentation);
+}
+
+int LuaApi::DecodeInstructions(lua_State* lua)
+{
+	errorCond(lua_gettop(lua) != 1, "decodeInstructions expects an options table");
+	luaL_checktype(lua, 1, LUA_TTABLE);
+	CpuType cpuType = (CpuType)LuaReadIntegerOption(lua, 1, "cpuType", (int)_context->GetDefaultCpuType(), false);
+	checkEnum(CpuType, cpuType, "invalid cpu type");
+	uint32_t address = (uint32_t)LuaReadIntegerOption(lua, 1, "address", 0, true);
+	uint32_t count = (uint32_t)LuaReadIntegerOption(lua, 1, "count", 1, false);
+	MemoryType memoryType = (MemoryType)LuaReadIntegerOption(lua, 1, "memoryType", (int)DebugUtilities::GetCpuMemoryType(cpuType), false);
+	bool includePresentation = LuaReadBoolOption(lua, 1, "includePresentation", false);
+	bool hasCpuFlags = false;
+	uint8_t cpuFlags = 0;
+	lua_getfield(lua, 1, "cpuFlags");
+	if(!lua_isnil(lua, -1)) {
+		hasCpuFlags = true;
+		cpuFlags = (uint8_t)luaL_checkinteger(lua, -1);
+	}
+	lua_pop(lua, 1);
+
+	checkEnum(MemoryType, memoryType, "invalid memory type");
+	errorCond(!_debugger->HasCpuType(cpuType), "This CPU type is not available for the current system");
+	errorCond(count > MaxLuaDecodeInstructions, "Maximum decode instruction count is 10000");
+	errorCond(address >= _memoryDumper->GetMemorySize(memoryType), "address is out of range");
+
+	lua_newtable(lua);
+	uint32_t outputIndex = 1;
+	uint32_t currentAddress = address;
+	for(uint32_t i = 0; i < count; i++) {
+		if(currentAddress >= _memoryDumper->GetMemorySize(memoryType)) {
+			break;
+		}
+
+		AddressInfo addressInfo { (int32_t)currentAddress, memoryType };
+		AddressInfo absoluteAddress = DebugUtilities::IsRelativeMemory(memoryType) ? _debugger->GetAbsoluteAddress(addressInfo) : addressInfo;
+		uint8_t flags = hasCpuFlags ? cpuFlags : _debugger->GetCpuFlags(cpuType, currentAddress);
+		DisassemblyInfo info = _debugger->GetDisassembler()->GetDisassemblyInfo(absoluteAddress, currentAddress, flags, cpuType);
+		LuaPushDisassemblyDecode(lua, info, cpuType, currentAddress, absoluteAddress, includePresentation, hasCpuFlags ? "provided" : "debugger", _debugger->GetLabelManager(), _emu->GetSettings());
+		lua_rawseti(lua, -2, outputIndex++);
+
+		uint8_t opSize = info.GetOpSize();
+		if(opSize == 0) {
+			break;
+		}
+		currentAddress += opSize;
+	}
+	return 1;
+}
+
 int LuaApi::GetDisassemblyRows(lua_State* lua)
 {
 	LuaCallHelper l(lua);
@@ -1991,6 +2185,59 @@ int LuaApi::GetRomInfo(lua_State* lua)
 	lua_pushstringvalue(path, romInfo.RomFile.GetFilePath());
 	lua_pushstringvalue(fileSha1Hash, _emu->GetHash(HashType::Sha1));
 
+	return 1;
+}
+
+int LuaApi::GetScriptInfo(lua_State* lua)
+{
+	LuaCallHelper l(lua);
+	checkparams();
+
+	lua_newtable(lua);
+	lua_pushstringvalue(scriptName, _context->GetScriptName());
+	lua_pushintvalue(defaultCpuType, (int)_context->GetDefaultCpuType());
+	LuaPushEnumName(lua, "defaultCpuName", _context->GetDefaultCpuType());
+	lua_pushintvalue(defaultMemoryType, (int)_context->GetDefaultMemType());
+	LuaPushEnumName(lua, "defaultMemoryName", _context->GetDefaultMemType());
+	lua_pushintvalue(drawSurface, (int)_context->GetDrawSurface());
+	lua_pushliteral(lua, "drawSurfaceName"); lua_pushstring(lua, string(magic_enum::enum_name<ScriptDrawSurface>(_context->GetDrawSurface())).c_str()); lua_settable(lua, -3);
+	lua_pushboolvalue(ioOsAccessAllowed, _context->IsIoOsAccessAllowed());
+	lua_pushboolvalue(networkAccessAllowed, _context->IsNetworkAccessAllowed());
+	lua_pushliteral(lua, "scriptTimeoutSeconds"); lua_pushinteger(lua, _context->GetScriptTimeout()); lua_settable(lua, -3);
+	return 1;
+}
+
+int LuaApi::GetRuntimeCapabilities(lua_State* lua)
+{
+	LuaCallHelper l(lua);
+	checkparams();
+
+	lua_newtable(lua);
+	lua_pushintvalue(mainCpuType, (int)_debugger->GetMainCpuType());
+	LuaPushEnumName(lua, "mainCpuName", _debugger->GetMainCpuType());
+	lua_pushliteral(lua, "consoleType"); lua_pushinteger(lua, (int)_emu->GetConsoleType()); lua_settable(lua, -3);
+	lua_pushliteral(lua, "consoleName"); lua_pushstring(lua, string(magic_enum::enum_name<ConsoleType>(_emu->GetConsoleType())).c_str()); lua_settable(lua, -3);
+	lua_pushboolvalue(ioOsAccessAllowed, _context->IsIoOsAccessAllowed());
+	lua_pushboolvalue(networkAccessAllowed, _context->IsNetworkAccessAllowed());
+
+	lua_pushliteral(lua, "cpuTypes");
+	lua_newtable(lua);
+	uint32_t cpuIndex = 1;
+	for(auto& entry : magic_enum::enum_entries<CpuType>()) {
+		CpuType cpuType = entry.first;
+		if(!_debugger->HasCpuType(cpuType)) {
+			continue;
+		}
+		lua_newtable(lua);
+		lua_pushintvalue(cpuType, (int)cpuType);
+		LuaPushEnumName(lua, "name", cpuType);
+		MemoryType memoryType = DebugUtilities::GetCpuMemoryType(cpuType);
+		lua_pushintvalue(defaultMemoryType, (int)memoryType);
+		LuaPushEnumName(lua, "defaultMemoryName", memoryType);
+		lua_pushintvalue(programCounterSize, DebugUtilities::GetProgramCounterSize(cpuType));
+		lua_rawseti(lua, -2, cpuIndex++);
+	}
+	lua_settable(lua, -3);
 	return 1;
 }
 

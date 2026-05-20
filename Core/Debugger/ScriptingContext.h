@@ -86,6 +86,9 @@ public:
 
 	void SetDrawSurface(ScriptDrawSurface surface) { _drawSurface = surface; }
 	ScriptDrawSurface GetDrawSurface() { return _drawSurface; }
+	uint32_t GetScriptTimeout();
+	bool IsIoOsAccessAllowed();
+	bool IsNetworkAccessAllowed();
 
 	template<typename T> void CallMemoryCallback(AddressInfo relAddr, T& value, CallbackType type, CpuType cpuType);
 	int CallEventCallback(EventType type, CpuType cpuType);
