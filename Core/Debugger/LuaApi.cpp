@@ -2030,8 +2030,8 @@ int LuaApi::DecodeInstructions(lua_State* lua)
 	luaL_checktype(lua, 1, LUA_TTABLE);
 	CpuType cpuType = (CpuType)LuaReadIntegerOption(lua, 1, "cpuType", (int)_context->GetDefaultCpuType(), false);
 	checkEnum(CpuType, cpuType, "invalid cpu type");
-	uint32_t address = (uint32_t)LuaReadIntegerOption(lua, 1, "address", 0, true);
-	uint32_t count = (uint32_t)LuaReadIntegerOption(lua, 1, "count", 1, false);
+	int32_t addressOption = LuaReadIntegerOption(lua, 1, "address", 0, true);
+	int32_t countOption = LuaReadIntegerOption(lua, 1, "count", 1, false);
 	MemoryType memoryType = (MemoryType)LuaReadIntegerOption(lua, 1, "memoryType", (int)DebugUtilities::GetCpuMemoryType(cpuType), false);
 	bool includePresentation = LuaReadBoolOption(lua, 1, "includePresentation", false);
 	bool hasCpuFlags = false;
@@ -2039,20 +2039,28 @@ int LuaApi::DecodeInstructions(lua_State* lua)
 	lua_getfield(lua, 1, "cpuFlags");
 	if(!lua_isnil(lua, -1)) {
 		hasCpuFlags = true;
-		cpuFlags = (uint8_t)luaL_checkinteger(lua, -1);
+		lua_Integer cpuFlagsValue = luaL_checkinteger(lua, -1);
+		errorCond(cpuFlagsValue < 0 || cpuFlagsValue > 255, "cpuFlags must be between 0 and 255");
+		cpuFlags = (uint8_t)cpuFlagsValue;
 	}
 	lua_pop(lua, 1);
 
 	checkEnum(MemoryType, memoryType, "invalid memory type");
 	errorCond(!_debugger->HasCpuType(cpuType), "This CPU type is not available for the current system");
-	errorCond(count > MaxLuaDecodeInstructions, "Maximum decode instruction count is 10000");
-	errorCond(address >= _memoryDumper->GetMemorySize(memoryType), "address is out of range");
+	errorCond(addressOption < 0, "address must be >= 0");
+	errorCond(countOption < 0, "count must be >= 0");
+	errorCond((uint32_t)countOption > MaxLuaDecodeInstructions, "Maximum decode instruction count is 10000");
+	uint32_t address = (uint32_t)addressOption;
+	uint32_t count = (uint32_t)countOption;
+	uint32_t memorySize = _memoryDumper->GetMemorySize(memoryType);
+	errorCond(memorySize == 0, "memory type has no readable bytes for the current system");
+	errorCond(address >= memorySize, "address is out of range");
 
 	lua_newtable(lua);
 	uint32_t outputIndex = 1;
 	uint32_t currentAddress = address;
 	for(uint32_t i = 0; i < count; i++) {
-		if(currentAddress >= _memoryDumper->GetMemorySize(memoryType)) {
+		if(currentAddress >= memorySize) {
 			break;
 		}
 
