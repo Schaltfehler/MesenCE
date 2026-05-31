@@ -226,6 +226,8 @@ int LuaApi::GetLibrary(lua_State* lua)
 		{ "setState", LuaApi::SetState },
 		{ "getCpuState", LuaApi::GetCpuState },
 		{ "setCpuState", LuaApi::SetCpuState },
+		{ "readRegister", LuaApi::ReadRegister },
+		{ "writeRegister", LuaApi::WriteRegister },
 
 		{ "getCpuCycleCount", LuaApi::GetCpuCycleCount },
 		{ "getMasterClock", LuaApi::GetMasterClock },
@@ -317,6 +319,8 @@ int LuaApi::GetLibrary(lua_State* lua)
 		{ "set", LuaApi::SetState },
 		{ "getCpu", LuaApi::GetCpuState },
 		{ "setCpu", LuaApi::SetCpuState },
+		{ "readRegister", LuaApi::ReadRegister },
+		{ "writeRegister", LuaApi::WriteRegister },
 		{ NULL, NULL }
 	};
 
@@ -2375,6 +2379,47 @@ int LuaApi::SetState(lua_State* lua)
 	return 0;
 }
 
+static string GetRegisterStateKey(string name)
+{
+	const string prefix = "cpu.";
+	if(name.rfind(prefix, 0) == 0) {
+		return name.substr(prefix.size());
+	}
+	return name;
+}
+
+int LuaApi::ReadRegister(lua_State* lua)
+{
+	LuaCallHelper l(lua);
+	l.ForceParamCount(2);
+	CpuType cpuType = (CpuType)l.ReadInteger((uint32_t)_context->GetDefaultCpuType());
+	checkEnum(CpuType, cpuType, "invalid cpu type");
+	string name = GetRegisterStateKey(l.ReadString());
+	errorCond(name.empty(), "register name cannot be empty");
+
+	Serializer& s = _serializer;
+	s.Reset();
+	ISerializable* cpu = _debugger->GetSerializableCpu(cpuType);
+	if(!cpu) {
+		luaL_error(lua, "CPU type does not expose serializable CPU state");
+		return 0;
+	}
+	s.Stream(*cpu, "", -1);
+
+	vector<string>& keys = s.GetMapKeys();
+	vector<SerializeMapValue>& values = s.GetMapValues();
+	for(size_t i = 0, len = values.size(); i < len; i++) {
+		if(keys[i] == name) {
+			errorCond(values[i].Format != SerializeMapValueFormat::Integer, "register field is not an integer CPU-state field");
+			lua_pushinteger(lua, values[i].Value.Integer);
+			return 1;
+		}
+	}
+
+	luaL_error(lua, (string("unknown CPU register/state field: ") + name).c_str());
+	return 0;
+}
+
 int LuaApi::SetCpuState(lua_State* lua)
 {
 	LuaCallHelper l(lua);
@@ -2393,6 +2438,47 @@ int LuaApi::SetCpuState(lua_State* lua)
 
 		s.Stream(*cpu, "", -1);
 	}
+	return 0;
+}
+
+int LuaApi::WriteRegister(lua_State* lua)
+{
+	LuaCallHelper l(lua);
+	l.ForceParamCount(3);
+	CpuType cpuType = (CpuType)l.ReadInteger((uint32_t)_context->GetDefaultCpuType());
+	checkEnum(CpuType, cpuType, "invalid cpu type");
+	uint32_t value = l.ReadInteger();
+	string name = GetRegisterStateKey(l.ReadString());
+	errorCond(name.empty(), "register name cannot be empty");
+
+	ISerializable* cpu = _debugger->GetSerializableCpu(cpuType);
+	if(!cpu) {
+		luaL_error(lua, "CPU type does not expose serializable CPU state");
+		return 0;
+	}
+
+	Serializer save(0, true, SerializeFormat::Map);
+	save.Stream(*cpu, "", -1);
+	vector<string>& keys = save.GetMapKeys();
+	vector<SerializeMapValue>& values = save.GetMapValues();
+	bool found = false;
+	for(size_t i = 0, len = values.size(); i < len; i++) {
+		if(keys[i] == name) {
+			errorCond(values[i].Format != SerializeMapValueFormat::Integer, "register field is not an integer CPU-state field");
+			found = true;
+			break;
+		}
+	}
+	if(!found) {
+		luaL_error(lua, (string("unknown CPU register/state field: ") + name).c_str());
+		return 0;
+	}
+
+	unordered_map<string, SerializeMapValue> map;
+	map.try_emplace(name, SerializeMapValueFormat::Integer, (int64_t)value);
+	Serializer load(0, false, SerializeFormat::Map);
+	load.LoadFromMap(map);
+	load.Stream(*cpu, "", -1);
 	return 0;
 }
 

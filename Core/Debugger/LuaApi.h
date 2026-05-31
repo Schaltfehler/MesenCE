@@ -100,9 +100,11 @@ public:
 
 	static int GetState(lua_State* lua);
 	static int GetCpuState(lua_State* lua);
+	static int ReadRegister(lua_State* lua);
 
 	static int SetState(lua_State* lua);
 	static int SetCpuState(lua_State* lua);
+	static int WriteRegister(lua_State* lua);
 
 	static int GetAccessCounters(lua_State* lua);
 	static int GetAccessCountersRange(lua_State* lua);

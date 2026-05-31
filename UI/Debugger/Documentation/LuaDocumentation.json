@@ -635,6 +635,16 @@
 	"returnValue": { "type": "Int", "description": "A 32-bit (signed or unsigned) value." }
 },
 {
+	"name": "readRegister",
+	"category": "Emulation",
+	"description": "Reads an integer field from the selected CPU's state. Register names are the keys returned by emu.getCpuState(); for convenience, a leading \"cpu.\" prefix is ignored.",
+	"parameters": [
+		{ "name": "name", "type": "String", "description": "CPU state field name" },
+		{ "name": "cpuType", "type": "Enum", "enumName": "cpuType", "description": "CPU type", "defaultValue": "main CPU" }
+	],
+	"returnValue": { "type": "Int", "description": "Current value of the CPU state field." }
+},
+{
 	"name": "removeMemoryCallbackWithPayload",
 	"category": "Callbacks",
 	"description": "Removes a memory payload callback registered with emu.addMemoryCallbackWithPayload() or emu.callbacks.onMemory(). The options table must match the registration options used when adding the callback.",
@@ -795,6 +805,16 @@
 		{ "name": "address", "type": "Int", "description": "Address to write to" },
 		{ "name": "value", "type": "Int", "description": "32-bit value to write" },
 		{ "name": "memoryType", "type": "Enum", "enumName": "memType", "description": "Memory type to write to" }
+	]
+},
+{
+	"name": "writeRegister",
+	"category": "Emulation",
+	"description": "Writes an integer field in the selected CPU's state. Register names are the keys returned by emu.getCpuState(); for convenience, a leading \"cpu.\" prefix is ignored.",
+	"parameters": [
+		{ "name": "name", "type": "String", "description": "CPU state field name" },
+		{ "name": "value", "type": "Int", "description": "Value to write" },
+		{ "name": "cpuType", "type": "Enum", "enumName": "cpuType", "description": "CPU type", "defaultValue": "main CPU" }
 	]
 },
 {
