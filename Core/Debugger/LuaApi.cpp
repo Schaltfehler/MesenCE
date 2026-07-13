@@ -2242,6 +2242,25 @@ int LuaApi::GetRuntimeCapabilities(lua_State* lua)
 	lua_pushliteral(lua, "consoleName"); lua_pushstring(lua, string(magic_enum::enum_name<ConsoleType>(_emu->GetConsoleType())).c_str()); lua_settable(lua, -3);
 	lua_pushboolvalue(ioOsAccessAllowed, _context->IsIoOsAccessAllowed());
 	lua_pushboolvalue(networkAccessAllowed, _context->IsNetworkAccessAllowed());
+	lua_pushintvalue(contractVersion, 1);
+
+	lua_pushliteral(lua, "surfaces");
+	lua_newtable(lua);
+	auto pushSurface = [lua](const char* name, bool available, int version) {
+		lua_pushstring(lua, name);
+		lua_newtable(lua);
+		lua_pushliteral(lua, "available");
+		lua_pushboolean(lua, available);
+		lua_settable(lua, -3);
+		lua_pushliteral(lua, "version");
+		lua_pushinteger(lua, version);
+		lua_settable(lua, -3);
+		lua_settable(lua, -3);
+	};
+	pushSurface("memoryCallbackPayload", true, 2);
+	pushSurface("ppuPixelProvenance", false, 0);
+	pushSurface("audioCapture", false, 0);
+	lua_settable(lua, -3);
 
 	lua_pushliteral(lua, "cpuTypes");
 	lua_newtable(lua);

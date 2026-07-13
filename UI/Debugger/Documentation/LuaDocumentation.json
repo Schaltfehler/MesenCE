@@ -530,8 +530,8 @@
 	"name": "getRuntimeCapabilities",
 	"category": "Miscellaneous",
 	"subcategory": "Debugger",
-	"description": "Returns runtime capability metadata for the current system and script context: main CPU, console type, I/O and network permission flags, and available CPU types with their default memory types. This function is also available as emu.runtime.getCapabilities.",
-	"returnValue": { "type": "Table", "description": "Runtime capability metadata" }
+	"description": "Returns runtime capability metadata for the current system and script context: contract version, main CPU, console type, I/O and network permission flags, available CPU types, and versioned debugger surfaces. Each surfaces entry contains available and version fields; version 0 means unavailable. This function is also available as emu.runtime.getCapabilities.",
+	"returnValue": { "type": "Table", "description": "{ contractVersion = int, surfaces = { [name] = { available = bool, version = int } }, ... }" }
 },
 {
 	"name": "getScreenBuffer",
