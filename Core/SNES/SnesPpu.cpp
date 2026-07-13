@@ -142,7 +142,7 @@ void SnesPpu::GetState(SnesPpuState& state, bool returnPartialState)
 
 bool SnesPpu::BeginPixelProvenance(DebugPixelProvenanceOptions options)
 {
-	if(_scanline != 0 || options.Width == 0 || options.Height == 0 || options.MaxRows == 0 || options.X + options.Width > 256 || options.Y + options.Height > 239 || (uint32_t)options.Width * options.Height > 4096 || options.MaxRows > 4096) {
+	if(_scanline != 0 || options.Width == 0 || options.Height == 0 || options.MaxRows == 0 || options.X + options.Width > 256 || options.Y + options.Height > 239 || (!options.FilterVramBytes && (uint32_t)options.Width * options.Height > 4096) || options.MaxRows > 4096 || (options.FilterVramBytes && options.VramByteStart > options.VramByteEnd)) {
 		return false;
 	}
 
@@ -543,6 +543,12 @@ bool SnesPpu::ProcessEndOfScanline(uint16_t& hClock)
 
 			if(_emu->IsRunAheadFrame()) {
 				_skipRender = true;
+			}
+			if(IsPixelProvenanceActive()) {
+				//A bounded debugger request targets this exact frame. Rendering may be
+				//discarded by the host, but the requested contributor rows must not
+				//silently become empty because fast-forward frame skipping won.
+				_skipRender = false;
 			}
 
 			//Ensure the SPC is re-enabled for the next frame
@@ -1663,6 +1669,25 @@ void SnesPpu::CapturePixelProvenance()
 		return;
 	}
 
+	auto matchesVramFilter = [&bounds](const DebugPixelContributor& contributor) {
+		if(!bounds.FilterVramBytes) {
+			return true;
+		}
+		for(uint8_t i = 0; i < contributor.TilemapByteCount; i++) {
+			int32_t address = contributor.TilemapByteAddresses[i];
+			if(address >= bounds.VramByteStart && address <= bounds.VramByteEnd) {
+				return true;
+			}
+		}
+		for(uint8_t i = 0; i < contributor.PatternByteCount; i++) {
+			int32_t address = contributor.PatternByteAddresses[i];
+			if(address >= bounds.VramByteStart && address <= bounds.VramByteEnd) {
+				return true;
+			}
+		}
+		return false;
+	};
+
 	for(uint16_t x = startX; x <= endX; x++) {
 		if(_pixelProvenance.Rows.size() >= bounds.MaxRows) {
 			_pixelProvenance.Overflow = true;
@@ -1680,6 +1705,9 @@ void SnesPpu::CapturePixelProvenance()
 		row.ColorMathUsedSubscreen = _colorMathUsedSubscreen[x];
 		row.ColorMathUsedFixedColor = _colorMathUsedFixedColor[x];
 		row.ColorMathOperandColor = _colorMathOperandColor[x];
+		if(bounds.FilterVramBytes && !matchesVramFilter(row.Main) && !matchesVramFilter(row.Sub)) {
+			continue;
+		}
 		_pixelProvenance.Rows.push_back(row);
 	}
 }

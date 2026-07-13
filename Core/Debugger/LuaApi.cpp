@@ -2280,7 +2280,7 @@ int LuaApi::GetRuntimeCapabilities(lua_State* lua)
 	bool snesPpuCheckpointAvailable = _emu->GetConsoleType() == ConsoleType::Snes;
 	pushSurface("ppuCheckpoint", snesPpuCheckpointAvailable, snesPpuCheckpointAvailable ? 1 : 0);
 	bool snesPixelProvenanceAvailable = _emu->GetConsoleType() == ConsoleType::Snes;
-	pushSurface("ppuPixelProvenance", snesPixelProvenanceAvailable, snesPixelProvenanceAvailable ? 1 : 0);
+	pushSurface("ppuPixelProvenance", snesPixelProvenanceAvailable, snesPixelProvenanceAvailable ? 2 : 0);
 	pushSurface("audioCapture", true, 1);
 	lua_settable(lua, -3);
 
@@ -2543,9 +2543,19 @@ int LuaApi::BeginPixelProvenance(lua_State* lua)
 	int64_t width = readOption("width");
 	int64_t height = readOption("height");
 	int64_t maxRows = readOption("maxRows");
+	lua_getfield(lua, 1, "vramByteStart");
+	bool hasVramByteStart = !lua_isnil(lua, -1);
+	int64_t vramByteStart = hasVramByteStart ? luaL_checkinteger(lua, -1) : 0;
+	lua_pop(lua, 1);
+	lua_getfield(lua, 1, "vramByteEnd");
+	bool hasVramByteEnd = !lua_isnil(lua, -1);
+	int64_t vramByteEnd = hasVramByteEnd ? luaL_checkinteger(lua, -1) : 0;
+	lua_pop(lua, 1);
+	errorCond(hasVramByteStart != hasVramByteEnd, "ppu.beginPixelProvenance vramByteStart and vramByteEnd must be supplied together");
+	errorCond(hasVramByteStart && (vramByteStart < 0 || vramByteEnd < vramByteStart || vramByteEnd > 0xFFFF), "ppu.beginPixelProvenance VRAM byte filter must be an inclusive range within 0..65535");
 	errorCond(x < 0 || x > 255 || y < 0 || y > 238, "ppu.beginPixelProvenance x/y is outside the standard-resolution SNES screen");
 	errorCond(width <= 0 || height <= 0 || x + width > 256 || y + height > 239, "ppu.beginPixelProvenance rectangle is empty or outside the standard-resolution SNES screen");
-	errorCond((uint64_t)width * (uint64_t)height > 4096, "ppu.beginPixelProvenance rectangle area exceeds 4096 pixels");
+	errorCond(!hasVramByteStart && (uint64_t)width * (uint64_t)height > 4096, "ppu.beginPixelProvenance rectangle area exceeds 4096 pixels without a VRAM byte filter");
 	errorCond(maxRows <= 0 || maxRows > 4096, "ppu.beginPixelProvenance maxRows must be between 1 and 4096");
 
 	DebugPixelProvenanceOptions options = {};
@@ -2554,13 +2564,16 @@ int LuaApi::BeginPixelProvenance(lua_State* lua)
 	options.Width = (uint16_t)width;
 	options.Height = (uint16_t)height;
 	options.MaxRows = (uint32_t)maxRows;
+	options.FilterVramBytes = hasVramByteStart;
+	options.VramByteStart = (uint16_t)vramByteStart;
+	options.VramByteEnd = (uint16_t)vramByteEnd;
 	IDebugger* debugger = _debugger->GetCpuDebugger(CpuType::Snes);
 	errorCond(!debugger || !debugger->BeginPixelProvenance(options), "ppu.beginPixelProvenance must be called during the SNES startFrame callback with bounded options");
 	DebugPixelProvenanceCapture capture = debugger->GetPixelProvenance();
 
 	lua_newtable(lua);
 	lua_pushliteral(lua, "status"); lua_pushstring(lua, "armed"); lua_settable(lua, -3);
-	lua_pushliteral(lua, "contractVersion"); lua_pushinteger(lua, 1); lua_settable(lua, -3);
+	lua_pushliteral(lua, "contractVersion"); lua_pushinteger(lua, 2); lua_settable(lua, -3);
 	lua_pushliteral(lua, "frameCount"); lua_pushinteger(lua, capture.FrameCount); lua_settable(lua, -3);
 	return 1;
 }
@@ -2577,7 +2590,7 @@ int LuaApi::GetPixelProvenance(lua_State* lua)
 	const char* status = !capture.Armed ? "not_armed" : !capture.Ready ? "capturing" : !capture.FrameModeSupported ? "unsupported_frame_mode" : "ready";
 
 	lua_newtable(lua);
-	lua_pushliteral(lua, "contractVersion"); lua_pushinteger(lua, 1); lua_settable(lua, -3);
+	lua_pushliteral(lua, "contractVersion"); lua_pushinteger(lua, 2); lua_settable(lua, -3);
 	lua_pushliteral(lua, "status"); lua_pushstring(lua, status); lua_settable(lua, -3);
 	lua_pushliteral(lua, "frameCount"); lua_pushinteger(lua, capture.FrameCount); lua_settable(lua, -3);
 	lua_pushboolvalue(overflow, capture.Overflow);
@@ -2591,6 +2604,11 @@ int LuaApi::GetPixelProvenance(lua_State* lua)
 	lua_pushliteral(lua, "width"); lua_pushinteger(lua, capture.Bounds.Width); lua_settable(lua, -3);
 	lua_pushliteral(lua, "height"); lua_pushinteger(lua, capture.Bounds.Height); lua_settable(lua, -3);
 	lua_pushliteral(lua, "maxRows"); lua_pushinteger(lua, capture.Bounds.MaxRows); lua_settable(lua, -3);
+	lua_pushliteral(lua, "vramByteFilterApplied"); lua_pushboolean(lua, capture.Bounds.FilterVramBytes); lua_settable(lua, -3);
+	if(capture.Bounds.FilterVramBytes) {
+		lua_pushliteral(lua, "vramByteStart"); lua_pushinteger(lua, capture.Bounds.VramByteStart); lua_settable(lua, -3);
+		lua_pushliteral(lua, "vramByteEnd"); lua_pushinteger(lua, capture.Bounds.VramByteEnd); lua_settable(lua, -3);
+	}
 	lua_settable(lua, -3);
 
 	lua_pushliteral(lua, "rows");

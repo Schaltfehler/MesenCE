@@ -544,9 +544,9 @@
 	"name": "beginPixelProvenance",
 	"category": "Miscellaneous",
 	"subcategory": "Debugger",
-	"description": "SNES only. Arms bounded standard-resolution winning-contributor capture for the frame beginning in the current startFrame callback. The options table requires x, y, width, height, and maxRows; rectangle area and maxRows are each capped at 4096. Full-screen, high-resolution/interlaced, and hidden/occluded contributor capture are not provided by contract version 1. Available as emu.ppu.beginPixelProvenance.",
+	"description": "SNES only. Arms bounded standard-resolution winning-contributor capture for the frame beginning in the current startFrame callback. The options table requires x, y, width, height, and maxRows. Without a filter, rectangle area and maxRows are each capped at 4096. Contract version 2 optionally accepts inclusive vramByteStart/vramByteEnd together; this permits a larger screen rectangle while retaining at most 4096 rows whose winning main/subscreen tilemap or pattern bytes overlap that VRAM range. An armed frame is rendered even when ordinary fast-forward frame skipping would discard it. High-resolution/interlaced and losing/occluded contributor capture remain unavailable. Available as emu.ppu.beginPixelProvenance.",
 	"parameters": [
-		{ "name": "options", "type": "Table", "description": "{ x = int, y = int, width = int, height = int, maxRows = int }" }
+		{ "name": "options", "type": "Table", "description": "{ x = int, y = int, width = int, height = int, maxRows = int, vramByteStart = optional int, vramByteEnd = optional int }" }
 	],
 	"returnValue": { "type": "Table", "description": "{ status = 'armed', contractVersion = 1, frameCount = int }" }
 },
@@ -554,7 +554,7 @@
 	"name": "getPixelProvenance",
 	"category": "Miscellaneous",
 	"subcategory": "Debugger",
-	"description": "SNES only. Returns the bounded capture armed by emu.ppu.beginPixelProvenance. Each ready row contains final RGB555 color, exact winning main/subscreen contributor facts, all pattern/tilemap byte addresses used by that winning contributor where applicable, OAM index for sprites, and color-math participation including exact operand source and RGB555 value. Contract version 1 does not retain losing/occluded contributors and reports high-resolution/interlaced frames as unsupported_frame_mode. Available as emu.ppu.getPixelProvenance.",
+	"description": "SNES only. Returns the bounded capture armed by emu.ppu.beginPixelProvenance. Each ready row contains final RGB555 color, exact winning main/subscreen contributor facts, all pattern/tilemap byte addresses used by that winning contributor where applicable, OAM index for sprites, and color-math participation including exact operand source and RGB555 value. Bounds disclose whether the contract-version-2 VRAM byte filter was applied. Losing/occluded contributors remain unavailable and high-resolution/interlaced frames report unsupported_frame_mode. Available as emu.ppu.getPixelProvenance.",
 	"returnValue": { "type": "Table", "description": "Versioned bounded pixel provenance capture with status, bounds, overflow, and rows" }
 },
 {

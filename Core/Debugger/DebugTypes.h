@@ -115,6 +115,9 @@ struct DebugPixelProvenanceOptions
 	uint16_t Width = 0;
 	uint16_t Height = 0;
 	uint32_t MaxRows = 0;
+	bool FilterVramBytes = false;
+	uint16_t VramByteStart = 0;
+	uint16_t VramByteEnd = 0;
 };
 
 struct DebugPixelProvenanceRow
