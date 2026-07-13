@@ -1,6 +1,7 @@
 #pragma once
 #include "pch.h"
 #include "SNES/SnesPpuTypes.h"
+#include "Debugger/DebugTypes.h"
 #include "Utilities/ISerializable.h"
 #include "Utilities/Timer.h"
 
@@ -80,9 +81,21 @@ private:
 
 	uint8_t _mainScreenFlags[256] = {};
 	uint16_t _mainScreenBuffer[256] = {};
+	DebugPixelContributor _mainScreenContributors[256] = {};
 
 	uint8_t _subScreenPriority[256] = {};
 	uint16_t _subScreenBuffer[256] = {};
+	DebugPixelContributor _subScreenContributors[256] = {};
+
+	bool _colorMathApplied[256] = {};
+	bool _colorMathPrevented[256] = {};
+	bool _colorMathClipApplied[256] = {};
+	bool _colorMathUsedSubscreen[256] = {};
+	bool _colorMathUsedFixedColor[256] = {};
+	uint16_t _colorMathOperandColor[256] = {};
+
+	DebugPixelContributor _mosaicContributors[4] = {};
+	DebugPixelProvenanceCapture _pixelProvenance = {};
 
 	uint32_t _mosaicColor[4] = {};
 	uint32_t _mosaicPriority[4] = {};
@@ -117,6 +130,10 @@ private:
 	uint8_t _spritePriorityCopy[256] = {};
 	uint8_t _spritePaletteCopy[256] = {};
 	uint8_t _spriteColorsCopy[256] = {};
+	uint8_t _spriteIndexesByPixel[256] = {};
+	uint8_t _spriteIndexesByPixelCopy[256] = {};
+	uint16_t _spriteChrAddresses[256][2] = {};
+	uint16_t _spriteChrAddressesCopy[256][2] = {};
 
 	int32_t _debugMode7StartX = 0;
 	int32_t _debugMode7StartY = 0;
@@ -189,6 +206,8 @@ private:
 
 	void ConvertToHiRes();
 	void ApplyHiResMode();
+	void CapturePixelProvenance();
+	__forceinline bool IsPixelProvenanceActive() { return _pixelProvenance.Armed && _pixelProvenance.FrameCount == _frameCount; }
 
 	template<uint8_t layerIndex>
 	bool ProcessMaskWindow(uint8_t activeWindowCount, int x);
@@ -258,6 +277,9 @@ public:
 	uint8_t* GetSpriteRam();
 
 	void DebugSendFrame();
+
+	bool BeginPixelProvenance(DebugPixelProvenanceOptions options);
+	DebugPixelProvenanceCapture GetPixelProvenance();
 
 	void SetLocationLatchRequest(uint16_t x, uint16_t y);
 	void ProcessLocationLatchRequest();

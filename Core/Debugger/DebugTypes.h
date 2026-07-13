@@ -82,6 +82,67 @@ struct CdlStatistics
 	uint32_t TotalChrBytes;
 };
 
+enum class DebugPixelSourceKind : uint8_t
+{
+	None = 0,
+	ForcedBlank,
+	Backdrop,
+	Background,
+	Sprite
+};
+
+struct DebugPixelContributor
+{
+	DebugPixelSourceKind Kind = DebugPixelSourceKind::None;
+	int16_t LayerIndex = -1;
+	uint8_t Priority = 0;
+	int32_t TilemapByteAddresses[2] = { -1, -1 };
+	uint8_t TilemapByteCount = 0;
+	uint16_t TilemapValue = 0;
+	uint16_t TileIndex = 0;
+	int32_t PatternByteAddresses[8] = { -1, -1, -1, -1, -1, -1, -1, -1 };
+	uint8_t PatternByteCount = 0;
+	int16_t PaletteIndex = -1;
+	int16_t ColorIndex = -1;
+	int16_t CgramIndex = -1;
+	int16_t OamIndex = -1;
+};
+
+struct DebugPixelProvenanceOptions
+{
+	uint16_t X = 0;
+	uint16_t Y = 0;
+	uint16_t Width = 0;
+	uint16_t Height = 0;
+	uint32_t MaxRows = 0;
+};
+
+struct DebugPixelProvenanceRow
+{
+	uint16_t X = 0;
+	uint16_t Y = 0;
+	uint16_t FinalColor = 0;
+	DebugPixelContributor Main = {};
+	DebugPixelContributor Sub = {};
+	bool ColorMathApplied = false;
+	bool ColorMathPrevented = false;
+	bool ColorMathClipApplied = false;
+	bool ColorMathUsedSubscreen = false;
+	bool ColorMathUsedFixedColor = false;
+	uint16_t ColorMathOperandColor = 0;
+};
+
+struct DebugPixelProvenanceCapture
+{
+	bool Armed = false;
+	bool Ready = false;
+	bool FrameModeSupported = true;
+	bool Overflow = false;
+	uint32_t FrameCount = 0;
+	DebugPixelProvenanceOptions Bounds = {};
+	vector<DebugPixelProvenanceRow> Rows;
+};
+
 struct DisassemblyResult
 {
 	AddressInfo Address;

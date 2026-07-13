@@ -541,6 +541,23 @@
 	"returnValue": { "type": "Table", "description": "Structured SNES PPU checkpoint with contractVersion = 1" }
 },
 {
+	"name": "beginPixelProvenance",
+	"category": "Miscellaneous",
+	"subcategory": "Debugger",
+	"description": "SNES only. Arms bounded standard-resolution winning-contributor capture for the frame beginning in the current startFrame callback. The options table requires x, y, width, height, and maxRows; rectangle area and maxRows are each capped at 4096. Full-screen, high-resolution/interlaced, and hidden/occluded contributor capture are not provided by contract version 1. Available as emu.ppu.beginPixelProvenance.",
+	"parameters": [
+		{ "name": "options", "type": "Table", "description": "{ x = int, y = int, width = int, height = int, maxRows = int }" }
+	],
+	"returnValue": { "type": "Table", "description": "{ status = 'armed', contractVersion = 1, frameCount = int }" }
+},
+{
+	"name": "getPixelProvenance",
+	"category": "Miscellaneous",
+	"subcategory": "Debugger",
+	"description": "SNES only. Returns the bounded capture armed by emu.ppu.beginPixelProvenance. Each ready row contains final RGB555 color, exact winning main/subscreen contributor facts, all pattern/tilemap byte addresses used by that winning contributor where applicable, OAM index for sprites, and color-math participation including exact operand source and RGB555 value. Contract version 1 does not retain losing/occluded contributors and reports high-resolution/interlaced frames as unsupported_frame_mode. Available as emu.ppu.getPixelProvenance.",
+	"returnValue": { "type": "Table", "description": "Versioned bounded pixel provenance capture with status, bounds, overflow, and rows" }
+},
+{
 	"name": "getScreenBuffer",
 	"category": "Drawing",
 	"description": "Returns an array of ARGB values with the contents of the console's screen - can be used with emu.setScreenBuffer() to modify the screen's contents.\n\nNote: The size of the array varies based on the console, game, and sometimes scene. Use emu.getScreenSize() to get the screen's current dimensions.",

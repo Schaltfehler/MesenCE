@@ -91,6 +91,8 @@ public:
 	static int GetScriptInfo(lua_State* lua);
 	static int GetRuntimeCapabilities(lua_State* lua);
 	static int GetPpuCheckpoint(lua_State* lua);
+	static int BeginPixelProvenance(lua_State* lua);
+	static int GetPixelProvenance(lua_State* lua);
 	static int GetLogWindowLog(lua_State* lua);
 
 	static void GenerateStateTable(Serializer& s, lua_State* lua);

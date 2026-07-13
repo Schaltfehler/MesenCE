@@ -34,6 +34,7 @@ struct SpriteInfo
 	int16_t DrawX;
 	uint16_t FetchAddress;
 	uint16_t ChrData[2];
+	uint16_t ChrAddress[2];
 
 	bool IsVisible(uint16_t scanline, bool interlace)
 	{
@@ -54,8 +55,10 @@ struct SpriteInfo
 struct TileData
 {
 	uint16_t TilemapData;
+	uint16_t TilemapAddress;
 	uint16_t VScroll;
 	uint16_t ChrData[4];
+	uint16_t ChrAddress[4];
 };
 
 struct LayerData

@@ -122,6 +122,8 @@ public:
 	BaseState& GetState() override;
 	void GetPpuState(BaseState& state) override;
 	void SetPpuState(BaseState& state) override;
+	bool BeginPixelProvenance(DebugPixelProvenanceOptions options) override;
+	DebugPixelProvenanceCapture GetPixelProvenance() override;
 	bool SaveRomToDisk(string filename, bool saveAsIps, CdlStripOption stripOption);
 	void ProcessInputOverrides(DebugControllerState inputOverrides[8]) override;
 };

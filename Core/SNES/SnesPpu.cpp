@@ -140,6 +140,25 @@ void SnesPpu::GetState(SnesPpuState& state, bool returnPartialState)
 	state.FrameCount = _frameCount;
 }
 
+bool SnesPpu::BeginPixelProvenance(DebugPixelProvenanceOptions options)
+{
+	if(_scanline != 0 || options.Width == 0 || options.Height == 0 || options.MaxRows == 0 || options.X + options.Width > 256 || options.Y + options.Height > 239 || (uint32_t)options.Width * options.Height > 4096 || options.MaxRows > 4096) {
+		return false;
+	}
+
+	_pixelProvenance = {};
+	_pixelProvenance.Armed = true;
+	_pixelProvenance.FrameCount = _frameCount;
+	_pixelProvenance.Bounds = options;
+	_pixelProvenance.Rows.reserve(std::min(options.MaxRows, (uint32_t)options.Width * options.Height));
+	return true;
+}
+
+DebugPixelProvenanceCapture SnesPpu::GetPixelProvenance()
+{
+	return _pixelProvenance;
+}
+
 template<bool hiResMode>
 void SnesPpu::GetTilemapData(uint8_t layerIndex, uint8_t columnIndex)
 {
@@ -201,6 +220,7 @@ void SnesPpu::GetTilemapData(uint8_t layerIndex, uint8_t columnIndex)
 	/* The tilemap address to read the tile data from */
 	uint16_t addr = baseOffset + (column & 0x1F) + (config.DoubleWidth ? (column & 0x20) << 5 : 0);
 	_layerData[layerIndex].Tiles[columnIndex].TilemapData = _vram[addr & 0x7FFF];
+	_layerData[layerIndex].Tiles[columnIndex].TilemapAddress = addr & 0x7FFF;
 	_layerData[layerIndex].Tiles[columnIndex].VScroll = vScroll;
 }
 
@@ -250,7 +270,9 @@ void SnesPpu::GetChrData(uint8_t layerIndex, uint8_t column, uint8_t plane)
 
 	uint8_t yOffset = vMirror ? (7 - baseYOffset) : baseYOffset;
 	uint16_t pixelStart = tileStart + yOffset + (plane << 3);
-	tileData.ChrData[plane + (secondTile ? bpp / 2 : 0)] = _vram[pixelStart & 0x7FFF];
+	uint8_t chrIndex = plane + (secondTile ? bpp / 2 : 0);
+	tileData.ChrData[chrIndex] = _vram[pixelStart & 0x7FFF];
+	tileData.ChrAddress[chrIndex] = pixelStart & 0x7FFF;
 }
 
 uint16_t SnesPpu::GetHvOffsetByteAddress(uint8_t columnIndex, bool forVertOffset)
@@ -453,11 +475,23 @@ bool SnesPpu::ProcessEndOfScanline(uint16_t& hClock)
 			memcpy(_spritePriority, _spritePriorityCopy, sizeof(_spritePriority));
 			memcpy(_spritePalette, _spritePaletteCopy, sizeof(_spritePalette));
 			memcpy(_spriteColors, _spriteColorsCopy, sizeof(_spriteColors));
+			memcpy(_spriteIndexesByPixel, _spriteIndexesByPixelCopy, sizeof(_spriteIndexesByPixel));
+			memcpy(_spriteChrAddresses, _spriteChrAddressesCopy, sizeof(_spriteChrAddresses));
 
 			memset(_spriteIndexes, 0xFF, sizeof(_spriteIndexes));
 
 			memset(_mainScreenFlags, 0, sizeof(_mainScreenFlags));
 			memset(_subScreenPriority, 0, sizeof(_subScreenPriority));
+			if(IsPixelProvenanceActive()) {
+				memset(_mainScreenContributors, 0, sizeof(_mainScreenContributors));
+				memset(_subScreenContributors, 0, sizeof(_subScreenContributors));
+				memset(_colorMathApplied, 0, sizeof(_colorMathApplied));
+				memset(_colorMathPrevented, 0, sizeof(_colorMathPrevented));
+				memset(_colorMathClipApplied, 0, sizeof(_colorMathClipApplied));
+				memset(_colorMathUsedSubscreen, 0, sizeof(_colorMathUsedSubscreen));
+				memset(_colorMathUsedFixedColor, 0, sizeof(_colorMathUsedFixedColor));
+				memset(_colorMathOperandColor, 0, sizeof(_colorMathOperandColor));
+			}
 
 			if(!_skipRender && _emu->IsDebugging()) {
 				DebugProcessMode7Overlay();
@@ -482,6 +516,9 @@ bool SnesPpu::ProcessEndOfScanline(uint16_t& hClock)
 			SnesConfig& cfg = _settings->GetSnesConfig();
 			_configVisibleLayers = (cfg.HideBgLayer1 ? 0 : 1) | (cfg.HideBgLayer2 ? 0 : 2) | (cfg.HideBgLayer3 ? 0 : 4) | (cfg.HideBgLayer4 ? 0 : 8) | (cfg.HideSprites ? 0 : 16);
 
+			if(_pixelProvenance.Armed && _pixelProvenance.FrameCount == _frameCount) {
+				_pixelProvenance.Ready = true;
+			}
 			_emu->ProcessEvent(EventType::EndFrame);
 
 			_frameCount++;
@@ -641,6 +678,8 @@ void SnesPpu::FetchSpriteData()
 	//From H=272 to 339, fetch a single word of CHR data on every cycle (for up to 34 sprites)
 	if(_fetchSpriteStart == 0) {
 		memset(_spritePriorityCopy, 0xFF, sizeof(_spritePriorityCopy));
+		memset(_spriteIndexesByPixelCopy, 0xFF, sizeof(_spriteIndexesByPixelCopy));
+		memset(_spriteChrAddressesCopy, 0xFF, sizeof(_spriteChrAddressesCopy));
 
 		_orgSpriteCount = _spriteCount;
 		_spriteTileCount = 0;
@@ -775,6 +814,7 @@ void SnesPpu::FetchSpriteTile(bool secondCycle)
 	//The timing for the fetches should be (mostly) accurate (H=272 to 339)
 	uint16_t chrData = _vram[_currentSprite.FetchAddress];
 	_currentSprite.ChrData[secondCycle] = chrData;
+	_currentSprite.ChrAddress[secondCycle] = _currentSprite.FetchAddress;
 
 	if(!secondCycle) {
 		_currentSprite.FetchAddress = (_currentSprite.FetchAddress + 8) & 0x7FFF;
@@ -792,6 +832,9 @@ void SnesPpu::FetchSpriteTile(bool secondCycle)
 				_spriteColorsCopy[xPos + x] = color;
 				_spritePriorityCopy[xPos + x] = _currentSprite.Priority;
 				_spritePaletteCopy[xPos + x] = _currentSprite.Palette;
+				_spriteIndexesByPixelCopy[xPos + x] = _currentSprite.Index;
+				_spriteChrAddressesCopy[xPos + x][0] = _currentSprite.ChrAddress[0];
+				_spriteChrAddressesCopy[xPos + x][1] = _currentSprite.ChrAddress[1];
 			}
 		}
 	}
@@ -943,6 +986,13 @@ void SnesPpu::RenderScanline()
 			//Forced blank, output black
 			memset(_mainScreenBuffer + _drawStartX, 0, (_drawEndX - _drawStartX + 1) * 2);
 			memset(_subScreenBuffer + _drawStartX, 0, (_drawEndX - _drawStartX + 1) * 2);
+			if(IsPixelProvenanceActive()) {
+				for(uint16_t x = _drawStartX; x <= _drawEndX; x++) {
+					_mainScreenContributors[x] = {};
+					_mainScreenContributors[x].Kind = DebugPixelSourceKind::ForcedBlank;
+					_subScreenContributors[x] = _mainScreenContributors[x];
+				}
+			}
 		} else {
 			switch(_state.BgMode) {
 				case 0: RenderMode0(); break;
@@ -960,6 +1010,7 @@ void SnesPpu::RenderScanline()
 		ApplyColorMath();
 		ApplyBrightness<true>();
 		ApplyHiResMode();
+		CapturePixelProvenance();
 
 		_drawStartX = _drawEndX + 1;
 	}
@@ -983,10 +1034,20 @@ void SnesPpu::RenderBgColor()
 			_state.InternalCgramAddress = 0;
 			_mainScreenBuffer[x] = _cgram[0];
 			_mainScreenFlags[x] = pixelFlags;
+			if(IsPixelProvenanceActive()) {
+				_mainScreenContributors[x] = {};
+				_mainScreenContributors[x].Kind = DebugPixelSourceKind::Backdrop;
+				_mainScreenContributors[x].CgramIndex = 0;
+			}
 		}
 		if(_subScreenPriority[x] == 0) {
 			_state.InternalCgramAddress = 0;
 			_subScreenBuffer[x] = _cgram[0];
+			if(IsPixelProvenanceActive()) {
+				_subScreenContributors[x] = {};
+				_subScreenContributors[x].Kind = DebugPixelSourceKind::Backdrop;
+				_subScreenContributors[x].CgramIndex = 0;
+			}
 		}
 	}
 }
@@ -999,6 +1060,7 @@ void SnesPpu::RenderSprites(const uint8_t priority[4])
 
 	bool drawMain = (bool)(((_state.MainScreenLayers & _configVisibleLayers) >> SnesPpu::SpriteLayerIndex) & 0x01);
 	bool drawSub = (bool)(((_state.SubScreenLayers & _configVisibleLayers) >> SnesPpu::SpriteLayerIndex) & 0x01);
+	bool captureProvenance = IsPixelProvenanceActive();
 
 	uint8_t mainWindowCount = 0;
 	uint8_t subWindowCount = 0;
@@ -1012,16 +1074,37 @@ void SnesPpu::RenderSprites(const uint8_t priority[4])
 	for(int x = _drawStartX; x <= _drawEndX; x++) {
 		if(_spritePriority[x] <= 3) {
 			uint8_t spritePrio = priority[_spritePriority[x]];
+			uint16_t paletteRamOffset = 128 + (_spritePalette[x] << 4) + _spriteColors[x];
+			DebugPixelContributor contributor = {};
+			if(captureProvenance) {
+				contributor.Kind = DebugPixelSourceKind::Sprite;
+				contributor.LayerIndex = SnesPpu::SpriteLayerIndex;
+				contributor.Priority = spritePrio;
+				for(uint8_t i = 0; i < 2; i++) {
+					int32_t byteAddress = _spriteChrAddresses[x][i] == 0xFFFF ? -1 : _spriteChrAddresses[x][i] << 1;
+					contributor.PatternByteAddresses[i * 2] = byteAddress;
+					contributor.PatternByteAddresses[i * 2 + 1] = byteAddress < 0 ? -1 : byteAddress + 1;
+				}
+				contributor.PatternByteCount = 4;
+				contributor.PaletteIndex = _spritePalette[x];
+				contributor.ColorIndex = _spriteColors[x];
+				contributor.CgramIndex = paletteRamOffset;
+				contributor.OamIndex = _spriteIndexesByPixel[x] == 0xFF ? -1 : _spriteIndexesByPixel[x];
+			}
 			if(drawMain && ((_mainScreenFlags[x] & 0x0F) < spritePrio) && !ProcessMaskWindow<SnesPpu::SpriteLayerIndex>(mainWindowCount, x)) {
-				uint16_t paletteRamOffset = 128 + (_spritePalette[x] << 4) + _spriteColors[x];
 				_mainScreenBuffer[x] = _cgram[paletteRamOffset];
 				_mainScreenFlags[x] = spritePrio | (((_state.ColorMathEnabled & 0x10) && _spritePalette[x] > 3) ? PixelFlags::AllowColorMath : 0);
+				if(captureProvenance) {
+					_mainScreenContributors[x] = contributor;
+				}
 			}
 
 			if(drawSub && (_subScreenPriority[x] < spritePrio) && !ProcessMaskWindow<SnesPpu::SpriteLayerIndex>(subWindowCount, x)) {
-				uint16_t paletteRamOffset = 128 + (_spritePalette[x] << 4) + _spriteColors[x];
 				_subScreenBuffer[x] = _cgram[paletteRamOffset];
 				_subScreenPriority[x] = spritePrio;
+				if(captureProvenance) {
+					_subScreenContributors[x] = contributor;
+				}
 			}
 		}
 	}
@@ -1032,6 +1115,7 @@ void SnesPpu::RenderTilemap()
 {
 	bool drawMain = (bool)(((_state.MainScreenLayers & _configVisibleLayers) >> layerIndex) & 0x01);
 	bool drawSub = (bool)(((_state.SubScreenLayers & _configVisibleLayers) >> layerIndex) & 0x01);
+	bool captureProvenance = IsPixelProvenanceActive();
 
 	uint8_t mainWindowCount = _state.WindowMaskMain[layerIndex] ? (uint8_t)_state.Window[0].ActiveLayers[layerIndex] + (uint8_t)_state.Window[1].ActiveLayers[layerIndex] : 0;
 	uint8_t subWindowCount = _state.WindowMaskSub[layerIndex] ? (uint8_t)_state.Window[0].ActiveLayers[layerIndex] + (uint8_t)_state.Window[1].ActiveLayers[layerIndex] : 0;
@@ -1044,8 +1128,8 @@ void SnesPpu::RenderTilemap()
 	uint8_t mosaicCounter = applyMosaic ? (_drawStartX % _state.MosaicSize) : 0;
 
 	uint8_t lookupIndex;
-	uint8_t chrDataOffset;
-	uint8_t hiresSubColor;
+	uint8_t chrDataOffset = 0;
+	uint8_t hiresSubColor = 0;
 	uint8_t pixelFlags = (((_state.ColorMathEnabled >> layerIndex) & 0x01) ? PixelFlags::AllowColorMath : 0);
 
 	for(int x = _drawStartX; x <= _drawEndX; x++) {
@@ -1078,18 +1162,49 @@ void SnesPpu::RenderTilemap()
 
 		uint8_t paletteIndex = (tilemapData >> 10) & 0x07;
 		uint8_t priority = (tilemapData & 0x2000) ? highPriority : normalPriority;
+		DebugPixelContributor contributor = {};
+		if(captureProvenance) {
+			contributor.Kind = DebugPixelSourceKind::Background;
+			contributor.LayerIndex = layerIndex;
+			contributor.Priority = priority;
+			contributor.TilemapByteAddresses[0] = tileData[lookupIndex].TilemapAddress << 1;
+			contributor.TilemapByteAddresses[1] = contributor.TilemapByteAddresses[0] + 1;
+			contributor.TilemapByteCount = 2;
+			contributor.TilemapValue = tilemapData;
+			contributor.TileIndex = tilemapData & 0x3FF;
+			contributor.PatternByteCount = bpp;
+			for(uint8_t i = 0; i < bpp / 2; i++) {
+				int32_t byteAddress = tileData[lookupIndex].ChrAddress[chrDataOffset + i] << 1;
+				contributor.PatternByteAddresses[i * 2] = byteAddress;
+				contributor.PatternByteAddresses[i * 2 + 1] = byteAddress + 1;
+			}
+			contributor.PaletteIndex = paletteIndex;
+			contributor.ColorIndex = color;
+			if constexpr(!directColorMode) {
+				contributor.CgramIndex = bpp == 8 ? basePaletteOffset + color : basePaletteOffset + paletteIndex * (1 << bpp) + color;
+			}
+		}
 
 		if constexpr(applyMosaic) {
 			if(mosaicCounter == 0) {
 				if constexpr(hiResMode) {
 					color = hiresSubColor;
+					if(captureProvenance) {
+						contributor.ColorIndex = color;
+					}
 				}
 				_mosaicColor[layerIndex] = (paletteIndex << 8) | color;
 				_mosaicPriority[layerIndex] = priority;
+				if(captureProvenance) {
+					_mosaicContributors[layerIndex] = contributor;
+				}
 			} else {
 				color = _mosaicColor[layerIndex] & 0xFF;
 				paletteIndex = _mosaicColor[layerIndex] >> 8;
 				priority = _mosaicPriority[layerIndex];
+				if(captureProvenance) {
+					contributor = _mosaicContributors[layerIndex];
+				}
 				if constexpr(hiResMode) {
 					hiresSubColor = color;
 				}
@@ -1104,10 +1219,16 @@ void SnesPpu::RenderTilemap()
 			uint16_t rgbColor = GetRgbColor<bpp, directColorMode, basePaletteOffset>(paletteIndex, color);
 			if(drawMain && (_mainScreenFlags[x] & 0x0F) < priority && !ProcessMaskWindow<layerIndex>(mainWindowCount, x)) {
 				DrawMainPixel(x, rgbColor, priority | pixelFlags);
+				if(captureProvenance) {
+					_mainScreenContributors[x] = contributor;
+				}
 			}
 			if constexpr(!hiResMode) {
 				if(drawSub && _subScreenPriority[x] < priority && !ProcessMaskWindow<layerIndex>(subWindowCount, x)) {
 					DrawSubPixel(x, rgbColor, priority);
+					if(captureProvenance) {
+						_subScreenContributors[x] = contributor;
+					}
 				}
 			}
 		}
@@ -1116,6 +1237,11 @@ void SnesPpu::RenderTilemap()
 			if(hiresSubColor > 0 && drawSub && _subScreenPriority[x] < priority && !ProcessMaskWindow<layerIndex>(subWindowCount, x)) {
 				uint16_t hiresSubRgbColor = GetRgbColor<bpp, directColorMode, basePaletteOffset>(paletteIndex, hiresSubColor);
 				DrawSubPixel(x, hiresSubRgbColor, priority);
+				if(captureProvenance) {
+					DebugPixelContributor subContributor = contributor;
+					subContributor.ColorIndex = hiresSubColor;
+					_subScreenContributors[x] = subContributor;
+				}
 			}
 		}
 	}
@@ -1186,6 +1312,7 @@ void SnesPpu::RenderTilemapMode7()
 
 	bool drawMain = (bool)(((_state.MainScreenLayers & _configVisibleLayers) >> layerIndex) & 0x01);
 	bool drawSub = (bool)(((_state.SubScreenLayers & _configVisibleLayers) >> layerIndex) & 0x01);
+	bool captureProvenance = IsPixelProvenanceActive();
 
 	auto clip = [](int32_t val) { return (val & 0x2000) ? (val | ~0x3ff) : (val & 0x3ff); };
 
@@ -1249,10 +1376,12 @@ void SnesPpu::RenderTilemapMode7()
 		yValue += yStep;
 
 		uint8_t tileIndex;
+		int32_t tilemapWordAddress = -1;
 		if(!_state.Mode7.LargeMap) {
 			yOffset &= 0x3FF;
 			xOffset &= 0x3FF;
-			tileIndex = (uint8_t)_vram[((yOffset & ~0x07) << 4) | (xOffset >> 3)];
+			tilemapWordAddress = ((yOffset & ~0x07) << 4) | (xOffset >> 3);
+			tileIndex = (uint8_t)_vram[tilemapWordAddress];
 		} else {
 			if(yOffset < 0 || yOffset > 0x3FF || xOffset < 0 || xOffset > 0x3FF) {
 				if(_state.Mode7.FillWithTile0) {
@@ -1262,28 +1391,52 @@ void SnesPpu::RenderTilemapMode7()
 					continue;
 				}
 			} else {
-				tileIndex = (uint8_t)_vram[((yOffset & ~0x07) << 4) | (xOffset >> 3)];
+				tilemapWordAddress = ((yOffset & ~0x07) << 4) | (xOffset >> 3);
+				tileIndex = (uint8_t)_vram[tilemapWordAddress];
 			}
 		}
 
+		uint32_t patternWordAddress = (tileIndex << 6) + ((yOffset & 0x07) << 3) + (xOffset & 0x07);
 		uint16_t colorIndex;
 		uint8_t priority;
 		if constexpr(layerIndex == 1) {
-			uint8_t color = _vram[((tileIndex << 6) + ((yOffset & 0x07) << 3) + (xOffset & 0x07))] >> 8;
+			uint8_t color = _vram[patternWordAddress] >> 8;
 			priority = (color & 0x80) ? highPriority : normalPriority;
 			colorIndex = (color & 0x7F);
 		} else {
 			priority = normalPriority;
-			colorIndex = _vram[((tileIndex << 6) + ((yOffset & 0x07) << 3) + (xOffset & 0x07))] >> 8;
+			colorIndex = _vram[patternWordAddress] >> 8;
+		}
+
+		DebugPixelContributor contributor = {};
+		if(captureProvenance) {
+			contributor.Kind = DebugPixelSourceKind::Background;
+			contributor.LayerIndex = layerIndex;
+			contributor.Priority = priority;
+			contributor.TilemapByteAddresses[0] = tilemapWordAddress < 0 ? -1 : tilemapWordAddress << 1;
+			contributor.TilemapByteCount = tilemapWordAddress < 0 ? 0 : 1;
+			contributor.TilemapValue = tileIndex;
+			contributor.TileIndex = tileIndex;
+			contributor.PatternByteAddresses[0] = (patternWordAddress << 1) + 1;
+			contributor.PatternByteCount = 1;
+			contributor.PaletteIndex = 0;
+			contributor.ColorIndex = colorIndex;
+			contributor.CgramIndex = directColorMode ? -1 : colorIndex;
 		}
 
 		if(applyMosaic) {
 			if(mosaicCounter == 0) {
 				_mosaicColor[layerIndex] = colorIndex;
 				_mosaicPriority[layerIndex] = priority;
+				if(captureProvenance) {
+					_mosaicContributors[layerIndex] = contributor;
+				}
 			} else {
 				colorIndex = _mosaicColor[layerIndex];
 				priority = _mosaicPriority[layerIndex];
+				if(captureProvenance) {
+					contributor = _mosaicContributors[layerIndex];
+				}
 			}
 
 			if(++mosaicCounter == _state.MosaicSize) {
@@ -1301,10 +1454,16 @@ void SnesPpu::RenderTilemapMode7()
 
 			if(drawMain && (_mainScreenFlags[x] & 0x0F) < priority && !ProcessMaskWindow<layerIndex>(mainWindowCount, x)) {
 				DrawMainPixel(x, paletteColor, priority | pixelFlags);
+				if(captureProvenance) {
+					_mainScreenContributors[x] = contributor;
+				}
 			}
 
 			if(drawSub && _subScreenPriority[x] < priority && !ProcessMaskWindow<layerIndex>(subWindowCount, x)) {
 				DrawSubPixel(x, paletteColor, priority);
+				if(captureProvenance) {
+					_subScreenContributors[x] = contributor;
+				}
 			}
 		}
 	}
@@ -1356,6 +1515,7 @@ void SnesPpu::ApplyColorMath()
 void SnesPpu::ApplyColorMathToPixel(uint16_t& pixelA, uint16_t pixelB, int x, bool isInsideWindow)
 {
 	uint8_t halfShift = (uint8_t)_state.ColorMathHalveResult;
+	bool captureProvenance = IsPixelProvenanceActive();
 
 	//Set color to black as needed based on clip mode
 	switch(_state.ColorMathClipMode) {
@@ -1366,6 +1526,9 @@ void SnesPpu::ApplyColorMathToPixel(uint16_t& pixelA, uint16_t pixelB, int x, bo
 			if(!isInsideWindow) {
 				pixelA = 0;
 				halfShift = 0;
+				if(captureProvenance) {
+					_colorMathClipApplied[x] = true;
+				}
 			}
 			break;
 
@@ -1373,14 +1536,25 @@ void SnesPpu::ApplyColorMathToPixel(uint16_t& pixelA, uint16_t pixelB, int x, bo
 			if(isInsideWindow) {
 				pixelA = 0;
 				halfShift = 0;
+				if(captureProvenance) {
+					_colorMathClipApplied[x] = true;
+				}
 			}
 			break;
 
-		case ColorWindowMode::Always: pixelA = 0; break;
+		case ColorWindowMode::Always:
+			pixelA = 0;
+			if(captureProvenance) {
+				_colorMathClipApplied[x] = true;
+			}
+			break;
 	}
 
 	if(!(_mainScreenFlags[x] & PixelFlags::AllowColorMath)) {
 		//Color math doesn't apply to this pixel
+		if(captureProvenance) {
+			_colorMathPrevented[x] = true;
+		}
 		return;
 	}
 
@@ -1391,23 +1565,39 @@ void SnesPpu::ApplyColorMathToPixel(uint16_t& pixelA, uint16_t pixelB, int x, bo
 
 		case ColorWindowMode::OutsideWindow:
 			if(!isInsideWindow) {
+				if(captureProvenance) {
+					_colorMathPrevented[x] = true;
+				}
 				return;
 			}
 			break;
 
 		case ColorWindowMode::InsideWindow:
 			if(isInsideWindow) {
+				if(captureProvenance) {
+					_colorMathPrevented[x] = true;
+				}
 				return;
 			}
 			break;
 
-		case ColorWindowMode::Always: return;
+		case ColorWindowMode::Always:
+			if(captureProvenance) {
+				_colorMathPrevented[x] = true;
+			}
+			return;
 	}
 
 	uint16_t otherPixel;
+	if(captureProvenance) {
+		_colorMathApplied[x] = true;
+	}
 	if(_state.ColorMathAddSubscreen) {
 		if(_subScreenPriority[x] > 0) {
 			otherPixel = pixelB;
+			if(captureProvenance) {
+				_colorMathUsedSubscreen[x] = true;
+			}
 		} else {
 			//there's nothing in the subscreen at this pixel, use the fixed color and disable halve operation
 			otherPixel = _state.FixedColor;
@@ -1415,6 +1605,10 @@ void SnesPpu::ApplyColorMathToPixel(uint16_t& pixelA, uint16_t pixelB, int x, bo
 		}
 	} else {
 		otherPixel = _state.FixedColor;
+	}
+	if(captureProvenance) {
+		_colorMathUsedFixedColor[x] = !_colorMathUsedSubscreen[x];
+		_colorMathOperandColor[x] = otherPixel;
 	}
 
 	constexpr unsigned int mask = 0x1F;
@@ -1444,6 +1638,49 @@ void SnesPpu::ApplyBrightness()
 			uint16_t b = ((pixel >> 10) & 0x1F) * _state.ScreenBrightness / 15;
 			pixel = r | (g << 5) | (b << 10);
 		}
+	}
+}
+
+void SnesPpu::CapturePixelProvenance()
+{
+	if(!_pixelProvenance.Armed || _pixelProvenance.FrameCount != _frameCount || _scanline == 0) {
+		return;
+	}
+	if(IsDoubleWidth() || _state.ScreenInterlace) {
+		_pixelProvenance.FrameModeSupported = false;
+		return;
+	}
+
+	uint16_t y = _scanline - 1;
+	DebugPixelProvenanceOptions& bounds = _pixelProvenance.Bounds;
+	if(y < bounds.Y || y >= bounds.Y + bounds.Height) {
+		return;
+	}
+
+	uint16_t startX = std::max(_drawStartX, bounds.X);
+	uint16_t endX = std::min(_drawEndX, (uint16_t)(bounds.X + bounds.Width - 1));
+	if(startX > endX) {
+		return;
+	}
+
+	for(uint16_t x = startX; x <= endX; x++) {
+		if(_pixelProvenance.Rows.size() >= bounds.MaxRows) {
+			_pixelProvenance.Overflow = true;
+			return;
+		}
+		DebugPixelProvenanceRow row = {};
+		row.X = x;
+		row.Y = y;
+		row.FinalColor = _mainScreenBuffer[x];
+		row.Main = _mainScreenContributors[x];
+		row.Sub = _subScreenContributors[x];
+		row.ColorMathApplied = _colorMathApplied[x];
+		row.ColorMathPrevented = _colorMathPrevented[x];
+		row.ColorMathClipApplied = _colorMathClipApplied[x];
+		row.ColorMathUsedSubscreen = _colorMathUsedSubscreen[x];
+		row.ColorMathUsedFixedColor = _colorMathUsedFixedColor[x];
+		row.ColorMathOperandColor = _colorMathOperandColor[x];
+		_pixelProvenance.Rows.push_back(row);
 	}
 }
 

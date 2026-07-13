@@ -350,6 +350,8 @@ int LuaApi::GetLibrary(lua_State* lua)
 
 	static const luaL_Reg ppuLib[] = {
 		{ "getCheckpoint", LuaApi::GetPpuCheckpoint },
+		{ "beginPixelProvenance", LuaApi::BeginPixelProvenance },
+		{ "getPixelProvenance", LuaApi::GetPixelProvenance },
 		{ NULL, NULL }
 	};
 
@@ -2268,7 +2270,8 @@ int LuaApi::GetRuntimeCapabilities(lua_State* lua)
 	pushSurface("memoryCallbackPayload", true, 2);
 	bool snesPpuCheckpointAvailable = _emu->GetConsoleType() == ConsoleType::Snes;
 	pushSurface("ppuCheckpoint", snesPpuCheckpointAvailable, snesPpuCheckpointAvailable ? 1 : 0);
-	pushSurface("ppuPixelProvenance", false, 0);
+	bool snesPixelProvenanceAvailable = _emu->GetConsoleType() == ConsoleType::Snes;
+	pushSurface("ppuPixelProvenance", snesPixelProvenanceAvailable, snesPixelProvenanceAvailable ? 1 : 0);
 	pushSurface("audioCapture", false, 0);
 	lua_settable(lua, -3);
 
@@ -2475,6 +2478,134 @@ int LuaApi::GetPpuCheckpoint(lua_State* lua)
 	lua_pushintvalue(internalCgramAddress, state.InternalCgramAddress);
 	lua_settable(lua, -3);
 
+	return 1;
+}
+
+static void LuaPushPixelContributor(lua_State* lua, const DebugPixelContributor& contributor)
+{
+	lua_newtable(lua);
+	lua_pushliteral(lua, "kind"); lua_pushinteger(lua, (int)contributor.Kind); lua_settable(lua, -3);
+	lua_pushliteral(lua, "kindName"); lua_pushstring(lua, string(magic_enum::enum_name<DebugPixelSourceKind>(contributor.Kind)).c_str()); lua_settable(lua, -3);
+	lua_pushintvalue(layerIndex, contributor.LayerIndex);
+	lua_pushintvalue(priority, contributor.Priority);
+	lua_pushliteral(lua, "tilemapByteAddresses");
+	lua_newtable(lua);
+	for(uint8_t i = 0; i < contributor.TilemapByteCount; i++) {
+		lua_pushinteger(lua, contributor.TilemapByteAddresses[i]);
+		lua_rawseti(lua, -2, i + 1);
+	}
+	lua_settable(lua, -3);
+	lua_pushintvalue(tilemapByteCount, contributor.TilemapByteCount);
+	lua_pushintvalue(tilemapValue, contributor.TilemapValue);
+	lua_pushintvalue(tileIndex, contributor.TileIndex);
+	lua_pushliteral(lua, "patternByteAddresses");
+	lua_newtable(lua);
+	for(uint8_t i = 0; i < contributor.PatternByteCount; i++) {
+		lua_pushinteger(lua, contributor.PatternByteAddresses[i]);
+		lua_rawseti(lua, -2, i + 1);
+	}
+	lua_settable(lua, -3);
+	lua_pushintvalue(patternByteCount, contributor.PatternByteCount);
+	lua_pushintvalue(paletteIndex, contributor.PaletteIndex);
+	lua_pushintvalue(colorIndex, contributor.ColorIndex);
+	lua_pushintvalue(cgramIndex, contributor.CgramIndex);
+	lua_pushintvalue(oamIndex, contributor.OamIndex);
+}
+
+int LuaApi::BeginPixelProvenance(lua_State* lua)
+{
+	LuaCallHelper l(lua);
+	checkinitdone();
+	errorCond(_emu->GetConsoleType() != ConsoleType::Snes, "ppu.beginPixelProvenance is currently available only for SNES");
+	errorCond(lua_gettop(lua) != 1 || !lua_istable(lua, 1), "ppu.beginPixelProvenance expects one options table");
+
+	auto readOption = [lua](const char* name) {
+		lua_getfield(lua, 1, name);
+		if(!lua_isinteger(lua, -1)) {
+			luaL_error(lua, "ppu.beginPixelProvenance option '%s' must be an integer", name);
+		}
+		int64_t value = lua_tointeger(lua, -1);
+		lua_pop(lua, 1);
+		return value;
+	};
+
+	int64_t x = readOption("x");
+	int64_t y = readOption("y");
+	int64_t width = readOption("width");
+	int64_t height = readOption("height");
+	int64_t maxRows = readOption("maxRows");
+	errorCond(x < 0 || x > 255 || y < 0 || y > 238, "ppu.beginPixelProvenance x/y is outside the standard-resolution SNES screen");
+	errorCond(width <= 0 || height <= 0 || x + width > 256 || y + height > 239, "ppu.beginPixelProvenance rectangle is empty or outside the standard-resolution SNES screen");
+	errorCond((uint64_t)width * (uint64_t)height > 4096, "ppu.beginPixelProvenance rectangle area exceeds 4096 pixels");
+	errorCond(maxRows <= 0 || maxRows > 4096, "ppu.beginPixelProvenance maxRows must be between 1 and 4096");
+
+	DebugPixelProvenanceOptions options = {};
+	options.X = (uint16_t)x;
+	options.Y = (uint16_t)y;
+	options.Width = (uint16_t)width;
+	options.Height = (uint16_t)height;
+	options.MaxRows = (uint32_t)maxRows;
+	IDebugger* debugger = _debugger->GetCpuDebugger(CpuType::Snes);
+	errorCond(!debugger || !debugger->BeginPixelProvenance(options), "ppu.beginPixelProvenance must be called during the SNES startFrame callback with bounded options");
+	DebugPixelProvenanceCapture capture = debugger->GetPixelProvenance();
+
+	lua_newtable(lua);
+	lua_pushliteral(lua, "status"); lua_pushstring(lua, "armed"); lua_settable(lua, -3);
+	lua_pushliteral(lua, "contractVersion"); lua_pushinteger(lua, 1); lua_settable(lua, -3);
+	lua_pushliteral(lua, "frameCount"); lua_pushinteger(lua, capture.FrameCount); lua_settable(lua, -3);
+	return 1;
+}
+
+int LuaApi::GetPixelProvenance(lua_State* lua)
+{
+	LuaCallHelper l(lua);
+	checkparams();
+	checkinitdone();
+	errorCond(_emu->GetConsoleType() != ConsoleType::Snes, "ppu.getPixelProvenance is currently available only for SNES");
+	IDebugger* debugger = _debugger->GetCpuDebugger(CpuType::Snes);
+	errorCond(!debugger, "SNES debugger is unavailable");
+	DebugPixelProvenanceCapture capture = debugger->GetPixelProvenance();
+	const char* status = !capture.Armed ? "not_armed" : !capture.Ready ? "capturing" : !capture.FrameModeSupported ? "unsupported_frame_mode" : "ready";
+
+	lua_newtable(lua);
+	lua_pushliteral(lua, "contractVersion"); lua_pushinteger(lua, 1); lua_settable(lua, -3);
+	lua_pushliteral(lua, "status"); lua_pushstring(lua, status); lua_settable(lua, -3);
+	lua_pushliteral(lua, "frameCount"); lua_pushinteger(lua, capture.FrameCount); lua_settable(lua, -3);
+	lua_pushboolvalue(overflow, capture.Overflow);
+	lua_pushboolvalue(frameModeSupported, capture.FrameModeSupported);
+	lua_pushliteral(lua, "subscreenContributorCaptured"); lua_pushboolean(lua, true); lua_settable(lua, -3);
+	lua_pushliteral(lua, "occludedContributorsCaptured"); lua_pushboolean(lua, false); lua_settable(lua, -3);
+	lua_pushliteral(lua, "bounds");
+	lua_newtable(lua);
+	lua_pushliteral(lua, "x"); lua_pushinteger(lua, capture.Bounds.X); lua_settable(lua, -3);
+	lua_pushliteral(lua, "y"); lua_pushinteger(lua, capture.Bounds.Y); lua_settable(lua, -3);
+	lua_pushliteral(lua, "width"); lua_pushinteger(lua, capture.Bounds.Width); lua_settable(lua, -3);
+	lua_pushliteral(lua, "height"); lua_pushinteger(lua, capture.Bounds.Height); lua_settable(lua, -3);
+	lua_pushliteral(lua, "maxRows"); lua_pushinteger(lua, capture.Bounds.MaxRows); lua_settable(lua, -3);
+	lua_settable(lua, -3);
+
+	lua_pushliteral(lua, "rows");
+	lua_newtable(lua);
+	for(uint32_t i = 0; i < capture.Rows.size(); i++) {
+		const DebugPixelProvenanceRow& row = capture.Rows[i];
+		lua_newtable(lua);
+		lua_pushliteral(lua, "x"); lua_pushinteger(lua, row.X); lua_settable(lua, -3);
+		lua_pushliteral(lua, "y"); lua_pushinteger(lua, row.Y); lua_settable(lua, -3);
+		lua_pushliteral(lua, "finalColorRgb555"); lua_pushinteger(lua, row.FinalColor); lua_settable(lua, -3);
+		lua_pushliteral(lua, "main"); LuaPushPixelContributor(lua, row.Main); lua_settable(lua, -3);
+		lua_pushliteral(lua, "sub"); LuaPushPixelContributor(lua, row.Sub); lua_settable(lua, -3);
+		lua_pushliteral(lua, "colorMath");
+		lua_newtable(lua);
+		lua_pushboolvalue(applied, row.ColorMathApplied);
+		lua_pushboolvalue(prevented, row.ColorMathPrevented);
+		lua_pushboolvalue(clipApplied, row.ColorMathClipApplied);
+		lua_pushboolvalue(usedSubscreen, row.ColorMathUsedSubscreen);
+		lua_pushboolvalue(usedFixedColor, row.ColorMathUsedFixedColor);
+		lua_pushintvalue(operandColorRgb555, row.ColorMathOperandColor);
+		lua_settable(lua, -3);
+		lua_rawseti(lua, -2, i + 1);
+	}
+	lua_settable(lua, -3);
 	return 1;
 }
 

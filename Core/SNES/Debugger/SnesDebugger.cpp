@@ -569,6 +569,16 @@ void SnesDebugger::SetPpuState(BaseState& srcState)
 	dstState = (SnesPpuState&)srcState;
 }
 
+bool SnesDebugger::BeginPixelProvenance(DebugPixelProvenanceOptions options)
+{
+	return _ppu->BeginPixelProvenance(options);
+}
+
+DebugPixelProvenanceCapture SnesDebugger::GetPixelProvenance()
+{
+	return _ppu->GetPixelProvenance();
+}
+
 bool SnesDebugger::SaveRomToDisk(string filename, bool saveAsIps, CdlStripOption stripOption)
 {
 	vector<uint8_t> output;
