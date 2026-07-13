@@ -90,6 +90,7 @@ public:
 	static int GetRomInfo(lua_State* lua);
 	static int GetScriptInfo(lua_State* lua);
 	static int GetRuntimeCapabilities(lua_State* lua);
+	static int GetPpuCheckpoint(lua_State* lua);
 	static int GetLogWindowLog(lua_State* lua);
 
 	static void GenerateStateTable(Serializer& s, lua_State* lua);

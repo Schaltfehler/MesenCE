@@ -36,6 +36,7 @@
 #include "Utilities/FolderUtilities.h"
 #include "Utilities/magic_enum.hpp"
 #include "Shared/MemoryOperationType.h"
+#include "SNES/SnesPpuTypes.h"
 
 #ifdef _MSC_VER
 	//TODO MSVC seems to trigger this by mistake because of the macros?
@@ -238,6 +239,7 @@ int LuaApi::GetLibrary(lua_State* lua)
 		{ "getRomInfo", LuaApi::GetRomInfo },
 		{ "getScriptInfo", LuaApi::GetScriptInfo },
 		{ "getRuntimeCapabilities", LuaApi::GetRuntimeCapabilities },
+		{ "getPpuCheckpoint", LuaApi::GetPpuCheckpoint },
 		{ "getLogWindowLog", LuaApi::GetLogWindowLog },
 		{ NULL, NULL }
 	};
@@ -346,6 +348,11 @@ int LuaApi::GetLibrary(lua_State* lua)
 		{ NULL, NULL }
 	};
 
+	static const luaL_Reg ppuLib[] = {
+		{ "getCheckpoint", LuaApi::GetPpuCheckpoint },
+		{ NULL, NULL }
+	};
+
 	static const luaL_Reg runtimeLib[] = {
 		{ "getRomInfo", LuaApi::GetRomInfo },
 		{ "getScriptInfo", LuaApi::GetScriptInfo },
@@ -371,6 +378,7 @@ int LuaApi::GetLibrary(lua_State* lua)
 	LuaPushSubLibrary(lua, "disassembly", disassemblyLib);
 	LuaPushSubLibrary(lua, "state", stateLib);
 	LuaPushSubLibrary(lua, "ui", uiLib);
+	LuaPushSubLibrary(lua, "ppu", ppuLib);
 	LuaPushSubLibrary(lua, "runtime", runtimeLib);
 	LuaPushSubLibrary(lua, "diagnostics", diagnosticsLib);
 
@@ -2258,6 +2266,8 @@ int LuaApi::GetRuntimeCapabilities(lua_State* lua)
 		lua_settable(lua, -3);
 	};
 	pushSurface("memoryCallbackPayload", true, 2);
+	bool snesPpuCheckpointAvailable = _emu->GetConsoleType() == ConsoleType::Snes;
+	pushSurface("ppuCheckpoint", snesPpuCheckpointAvailable, snesPpuCheckpointAvailable ? 1 : 0);
 	pushSurface("ppuPixelProvenance", false, 0);
 	pushSurface("audioCapture", false, 0);
 	lua_settable(lua, -3);
@@ -2280,6 +2290,191 @@ int LuaApi::GetRuntimeCapabilities(lua_State* lua)
 		lua_rawseti(lua, -2, cpuIndex++);
 	}
 	lua_settable(lua, -3);
+	return 1;
+}
+
+int LuaApi::GetPpuCheckpoint(lua_State* lua)
+{
+	LuaCallHelper l(lua);
+	checkparams();
+	checkinitdone();
+	errorCond(_emu->GetConsoleType() != ConsoleType::Snes, "ppu.getCheckpoint is currently available only for SNES");
+
+	SnesPpuState state;
+	_debugger->GetPpuState(state, CpuType::Snes);
+
+	auto pushBoolArray = [lua](const char* name, const bool* values, uint32_t count) {
+		lua_pushstring(lua, name);
+		lua_newtable(lua);
+		for(uint32_t i = 0; i < count; i++) {
+			lua_pushboolean(lua, values[i]);
+			lua_rawseti(lua, -2, i + 1);
+		}
+		lua_settable(lua, -3);
+	};
+
+	lua_newtable(lua);
+	lua_pushintvalue(contractVersion, 1);
+	lua_pushliteral(lua, "capturePhase");
+	lua_pushstring(lua, "callback_atomic_state");
+	lua_settable(lua, -3);
+	lua_pushliteral(lua, "frameCount");
+	lua_pushinteger(lua, state.FrameCount);
+	lua_settable(lua, -3);
+	lua_pushliteral(lua, "masterClock");
+	lua_pushinteger(lua, _emu->GetMasterClock());
+	lua_settable(lua, -3);
+	lua_pushintvalue(scanline, state.Scanline);
+	lua_pushintvalue(cycle, state.Cycle);
+	lua_pushintvalue(hClock, state.HClock);
+	lua_pushboolvalue(forcedBlank, state.ForcedBlank);
+	lua_pushintvalue(screenBrightness, state.ScreenBrightness);
+	lua_pushintvalue(bgMode, state.BgMode);
+	lua_pushboolvalue(mode1Bg3Priority, state.Mode1Bg3Priority);
+	lua_pushintvalue(mainScreenLayers, state.MainScreenLayers);
+	lua_pushintvalue(subScreenLayers, state.SubScreenLayers);
+
+	lua_pushliteral(lua, "display");
+	lua_newtable(lua);
+	lua_pushboolvalue(extBgEnabled, state.ExtBgEnabled);
+	lua_pushboolvalue(hiResMode, state.HiResMode);
+	lua_pushboolvalue(screenInterlace, state.ScreenInterlace);
+	lua_pushboolvalue(objInterlace, state.ObjInterlace);
+	lua_pushboolvalue(overscanMode, state.OverscanMode);
+	lua_pushboolvalue(directColorMode, state.DirectColorMode);
+	lua_settable(lua, -3);
+
+	lua_pushliteral(lua, "layers");
+	lua_newtable(lua);
+	for(uint32_t i = 0; i < 4; i++) {
+		LayerConfig& layer = state.Layers[i];
+		lua_newtable(lua);
+		lua_pushliteral(lua, "index");
+		lua_pushinteger(lua, i);
+		lua_settable(lua, -3);
+		lua_pushintvalue(tilemapWordAddress, layer.TilemapAddress);
+		lua_pushliteral(lua, "tilemapByteAddress");
+		lua_pushinteger(lua, layer.TilemapAddress << 1);
+		lua_settable(lua, -3);
+		lua_pushintvalue(chrWordAddress, layer.ChrAddress);
+		lua_pushliteral(lua, "chrByteAddress");
+		lua_pushinteger(lua, layer.ChrAddress << 1);
+		lua_settable(lua, -3);
+		lua_pushintvalue(hScroll, layer.HScroll);
+		lua_pushintvalue(vScroll, layer.VScroll);
+		lua_pushboolvalue(doubleWidth, layer.DoubleWidth);
+		lua_pushboolvalue(doubleHeight, layer.DoubleHeight);
+		lua_pushboolvalue(largeTiles, layer.LargeTiles);
+		lua_rawseti(lua, -2, i + 1);
+	}
+	lua_settable(lua, -3);
+
+	lua_pushliteral(lua, "mosaic");
+	lua_newtable(lua);
+	lua_pushintvalue(size, state.MosaicSize);
+	lua_pushintvalue(enabledLayerMask, state.MosaicEnabled);
+	lua_settable(lua, -3);
+
+	lua_pushliteral(lua, "mode7");
+	lua_newtable(lua);
+	lua_pushliteral(lua, "matrix");
+	lua_newtable(lua);
+	for(uint32_t i = 0; i < 4; i++) {
+		lua_pushinteger(lua, state.Mode7.Matrix[i]);
+		lua_rawseti(lua, -2, i + 1);
+	}
+	lua_settable(lua, -3);
+	lua_pushintvalue(hScroll, state.Mode7.HScroll);
+	lua_pushintvalue(vScroll, state.Mode7.VScroll);
+	lua_pushintvalue(centerX, state.Mode7.CenterX);
+	lua_pushintvalue(centerY, state.Mode7.CenterY);
+	lua_pushboolvalue(largeMap, state.Mode7.LargeMap);
+	lua_pushboolvalue(fillWithTile0, state.Mode7.FillWithTile0);
+	lua_pushboolvalue(horizontalMirroring, state.Mode7.HorizontalMirroring);
+	lua_pushboolvalue(verticalMirroring, state.Mode7.VerticalMirroring);
+	lua_settable(lua, -3);
+
+	lua_pushliteral(lua, "windows");
+	lua_newtable(lua);
+	for(uint32_t i = 0; i < 2; i++) {
+		lua_newtable(lua);
+		lua_pushliteral(lua, "index");
+		lua_pushinteger(lua, i);
+		lua_settable(lua, -3);
+		lua_pushintvalue(left, state.Window[i].Left);
+		lua_pushintvalue(right, state.Window[i].Right);
+		pushBoolArray("activeLayers", state.Window[i].ActiveLayers, 6);
+		pushBoolArray("invertedLayers", state.Window[i].InvertedLayers, 6);
+		lua_rawseti(lua, -2, i + 1);
+	}
+	lua_settable(lua, -3);
+
+	lua_pushliteral(lua, "windowMask");
+	lua_newtable(lua);
+	pushBoolArray("main", state.WindowMaskMain, 5);
+	pushBoolArray("sub", state.WindowMaskSub, 5);
+	lua_pushliteral(lua, "logic");
+	lua_newtable(lua);
+	for(uint32_t i = 0; i < 6; i++) {
+		lua_newtable(lua);
+		lua_pushliteral(lua, "value");
+		lua_pushinteger(lua, (int)state.MaskLogic[i]);
+		lua_settable(lua, -3);
+		lua_pushliteral(lua, "name");
+		lua_pushstring(lua, string(magic_enum::enum_name<WindowMaskLogic>(state.MaskLogic[i])).c_str());
+		lua_settable(lua, -3);
+		lua_rawseti(lua, -2, i + 1);
+	}
+	lua_settable(lua, -3);
+	lua_settable(lua, -3);
+
+	lua_pushliteral(lua, "oam");
+	lua_newtable(lua);
+	lua_pushintvalue(mode, state.OamMode);
+	lua_pushintvalue(baseWordAddress, state.OamBaseAddress);
+	lua_pushliteral(lua, "baseByteAddress");
+	lua_pushinteger(lua, state.OamBaseAddress << 1);
+	lua_settable(lua, -3);
+	lua_pushintvalue(addressOffsetWords, state.OamAddressOffset);
+	lua_pushliteral(lua, "addressOffsetBytes");
+	lua_pushinteger(lua, state.OamAddressOffset << 1);
+	lua_settable(lua, -3);
+	lua_pushintvalue(ramAddress, state.OamRamAddress);
+	lua_pushintvalue(internalAddress, state.InternalOamAddress);
+	lua_pushboolvalue(priorityRotationEnabled, state.EnableOamPriority);
+	lua_settable(lua, -3);
+
+	lua_pushliteral(lua, "colorMath");
+	lua_newtable(lua);
+	lua_pushliteral(lua, "clipMode");
+	lua_pushinteger(lua, (int)state.ColorMathClipMode);
+	lua_settable(lua, -3);
+	lua_pushliteral(lua, "clipModeName");
+	lua_pushstring(lua, string(magic_enum::enum_name<ColorWindowMode>(state.ColorMathClipMode)).c_str());
+	lua_settable(lua, -3);
+	lua_pushliteral(lua, "preventMode");
+	lua_pushinteger(lua, (int)state.ColorMathPreventMode);
+	lua_settable(lua, -3);
+	lua_pushliteral(lua, "preventModeName");
+	lua_pushstring(lua, string(magic_enum::enum_name<ColorWindowMode>(state.ColorMathPreventMode)).c_str());
+	lua_settable(lua, -3);
+	lua_pushboolvalue(addSubscreen, state.ColorMathAddSubscreen);
+	lua_pushintvalue(enabledLayerMask, state.ColorMathEnabled);
+	lua_pushboolvalue(subtractMode, state.ColorMathSubtractMode);
+	lua_pushboolvalue(halveResult, state.ColorMathHalveResult);
+	lua_pushintvalue(fixedColor, state.FixedColor);
+	lua_settable(lua, -3);
+
+	lua_pushliteral(lua, "ports");
+	lua_newtable(lua);
+	lua_pushintvalue(vramAddress, state.VramAddress);
+	lua_pushintvalue(vramIncrementValue, state.VramIncrementValue);
+	lua_pushintvalue(vramAddressRemapping, state.VramAddressRemapping);
+	lua_pushboolvalue(vramIncrementOnSecondRegister, state.VramAddrIncrementOnSecondReg);
+	lua_pushintvalue(cgramAddress, state.CgramAddress);
+	lua_pushintvalue(internalCgramAddress, state.InternalCgramAddress);
+	lua_settable(lua, -3);
+
 	return 1;
 }
 

@@ -534,6 +534,13 @@
 	"returnValue": { "type": "Table", "description": "{ contractVersion = int, surfaces = { [name] = { available = bool, version = int } }, ... }" }
 },
 {
+	"name": "getPpuCheckpoint",
+	"category": "Miscellaneous",
+	"subcategory": "Debugger",
+	"description": "SNES only. Returns a bounded, versioned PPU state checkpoint captured atomically in the current callback. Includes render clock/phase, display mode, BG layer addresses and scroll, mosaic, Mode 7, windows, OAM configuration, color math, and PPU port state. It does not include VRAM/CGRAM/OAM bytes or pixel contributor claims. This function is also available as emu.ppu.getCheckpoint.",
+	"returnValue": { "type": "Table", "description": "Structured SNES PPU checkpoint with contractVersion = 1" }
+},
+{
 	"name": "getScreenBuffer",
 	"category": "Drawing",
 	"description": "Returns an array of ARGB values with the contents of the console's screen - can be used with emu.setScreenBuffer() to modify the screen's contents.\n\nNote: The size of the array varies based on the console, game, and sometimes scene. Use emu.getScreenSize() to get the screen's current dimensions.",
