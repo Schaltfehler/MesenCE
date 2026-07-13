@@ -12,6 +12,33 @@
 #include "Utilities/Audio/ReverbFilter.h"
 #include "Utilities/Audio/CrossFeedFilter.h"
 
+static void CopyEqualizerBandGains(AudioConfig& cfg, double* output)
+{
+	double gains[20] = {
+		cfg.Band1Gain, cfg.Band2Gain, cfg.Band3Gain, cfg.Band4Gain, cfg.Band5Gain,
+		cfg.Band6Gain, cfg.Band7Gain, cfg.Band8Gain, cfg.Band9Gain, cfg.Band10Gain,
+		cfg.Band11Gain, cfg.Band12Gain, cfg.Band13Gain, cfg.Band14Gain, cfg.Band15Gain,
+		cfg.Band16Gain, cfg.Band17Gain, cfg.Band18Gain, cfg.Band19Gain, cfg.Band20Gain
+	};
+	memcpy(output, gains, sizeof(gains));
+}
+
+static bool AudioCaptureSettingsMatch(InvestigationAudioCaptureState& state, AudioConfig& cfg, uint32_t effectiveMasterVolume, bool integerFpsMode)
+{
+	double gains[20] = {};
+	CopyEqualizerBandGains(cfg, gains);
+	return state.SampleRate == cfg.SampleRate &&
+		state.EffectiveMasterVolume == effectiveMasterVolume &&
+		state.EqualizerEnabled == cfg.EnableEqualizer &&
+		memcmp(state.EqualizerBandGains, gains, sizeof(gains)) == 0 &&
+		state.ReverbEnabled == cfg.ReverbEnabled &&
+		state.ReverbStrength == cfg.ReverbStrength &&
+		state.ReverbDelay == cfg.ReverbDelay &&
+		state.CrossFeedEnabled == cfg.CrossFeedEnabled &&
+		state.CrossFeedRatio == cfg.CrossFeedRatio &&
+		state.IntegerFpsMode == integerFpsMode;
+}
+
 SoundMixer::SoundMixer(Emulator* emu)
 {
 	_emu = emu;
@@ -74,7 +101,7 @@ void SoundMixer::PlayAudioBuffer(int16_t* samples, uint32_t sampleCount, uint32_
 	EmuSettings* settings = _emu->GetSettings();
 	AudioPlayerHud* audioPlayer = _emu->GetAudioPlayerHud();
 	AudioConfig cfg = settings->GetAudioConfig();
-	bool isRecording = _waveRecorder || _emu->GetVideoRenderer()->IsRecording();
+	bool isRecording = IsRecording() || _emu->GetVideoRenderer()->IsRecording();
 
 	uint32_t masterVolume = audioPlayer ? audioPlayer->GetVolume() : cfg.MasterVolume;
 	if(!isRecording) {
@@ -127,6 +154,8 @@ void SoundMixer::PlayAudioBuffer(int16_t* samples, uint32_t sampleCount, uint32_
 		}
 	}
 
+	WriteInvestigationCapture(out, count, cfg.SampleRate, cfg, masterVolume);
+
 	RewindManager* rewindManager = _emu->GetRewindManager();
 	if(!_emu->IsRunAheadFrame() && rewindManager && rewindManager->SendAudio(out, count)) {
 		if(isRecording) {
@@ -164,6 +193,43 @@ void SoundMixer::PlayAudioBuffer(int16_t* samples, uint32_t sampleCount, uint32_
 	}
 }
 
+void SoundMixer::WriteInvestigationCapture(int16_t* samples, uint32_t sampleCount, uint32_t sampleRate, AudioConfig& cfg, uint32_t effectiveMasterVolume)
+{
+	if(!_investigationCapture.Active || !_investigationWaveRecorder) {
+		return;
+	}
+
+	bool integerFpsMode = _emu->GetSettings()->GetVideoConfig().IntegerFpsMode;
+	if(!AudioCaptureSettingsMatch(_investigationCapture, cfg, effectiveMasterVolume, integerFpsMode)) {
+		_investigationCapture.SettingsChanged = true;
+	}
+
+	uint64_t remaining = _investigationCapture.MaxSampleFrames - _investigationCapture.SampleFrameCount;
+	uint32_t retainedCount = (uint32_t)std::min<uint64_t>(sampleCount, remaining);
+	if(retainedCount > 0) {
+		if(!_investigationWaveRecorder->WriteSamples(samples, retainedCount, sampleRate, true)) {
+			_investigationCapture.WriteError = true;
+			_investigationCapture.Active = false;
+			_investigationCapture.Closed = true;
+			_investigationWaveRecorder.reset();
+			return;
+		}
+		for(uint32_t i = 0; i < retainedCount; i++) {
+			if(samples[i * 2] == 0 && samples[i * 2 + 1] == 0) {
+				_investigationCapture.SilentSampleFrameCount++;
+			}
+		}
+		_investigationCapture.SampleFrameCount += retainedCount;
+	}
+	if(retainedCount < sampleCount || _investigationCapture.SampleFrameCount >= _investigationCapture.MaxSampleFrames) {
+		_investigationCapture.Overflow = retainedCount < sampleCount;
+		_investigationCapture.LimitReached = true;
+		_investigationCapture.Active = false;
+		_investigationCapture.Closed = true;
+		_investigationWaveRecorder.reset();
+	}
+}
+
 void SoundMixer::ProcessEqualizer(int16_t* samples, uint32_t sampleCount, uint32_t targetRate)
 {
 	AudioConfig cfg = _emu->GetSettings()->GetAudioConfig();
@@ -195,7 +261,51 @@ void SoundMixer::StopRecording()
 
 bool SoundMixer::IsRecording()
 {
-	return _waveRecorder != nullptr;
+	return _waveRecorder != nullptr || _investigationCapture.Active;
+}
+
+bool SoundMixer::StartInvestigationCapture(string filepath, uint64_t maxSampleFrames)
+{
+	StopInvestigationCapture();
+	_investigationCapture = {};
+	_investigationCapture.Started = true;
+	AudioConfig cfg = _emu->GetSettings()->GetAudioConfig();
+	AudioPlayerHud* audioPlayer = _emu->GetAudioPlayerHud();
+	_investigationCapture.SampleRate = cfg.SampleRate;
+	_investigationCapture.MaxSampleFrames = maxSampleFrames;
+	_investigationCapture.EffectiveMasterVolume = audioPlayer ? audioPlayer->GetVolume() : cfg.MasterVolume;
+	_investigationCapture.EqualizerEnabled = cfg.EnableEqualizer;
+	CopyEqualizerBandGains(cfg, _investigationCapture.EqualizerBandGains);
+	_investigationCapture.ReverbEnabled = cfg.ReverbEnabled;
+	_investigationCapture.ReverbStrength = cfg.ReverbStrength;
+	_investigationCapture.ReverbDelay = cfg.ReverbDelay;
+	_investigationCapture.CrossFeedEnabled = cfg.CrossFeedEnabled;
+	_investigationCapture.CrossFeedRatio = cfg.CrossFeedRatio;
+	_investigationCapture.IntegerFpsMode = _emu->GetSettings()->GetVideoConfig().IntegerFpsMode;
+	_investigationCapture.OutputPath = filepath;
+	_investigationWaveRecorder.reset(new WaveRecorder(filepath, _investigationCapture.SampleRate, true));
+	if(!_investigationWaveRecorder->IsOpen()) {
+		_investigationCapture.WriteError = true;
+		_investigationCapture.Closed = true;
+		_investigationWaveRecorder.reset();
+		return false;
+	}
+	_investigationCapture.Active = true;
+	return true;
+}
+
+void SoundMixer::StopInvestigationCapture()
+{
+	if(_investigationCapture.Started) {
+		_investigationCapture.Active = false;
+		_investigationCapture.Closed = true;
+	}
+	_investigationWaveRecorder.reset();
+}
+
+InvestigationAudioCaptureState SoundMixer::GetInvestigationCaptureState()
+{
+	return _investigationCapture;
 }
 
 void SoundMixer::GetLastSamples(int16_t& left, int16_t& right)

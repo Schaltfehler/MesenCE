@@ -52,14 +52,22 @@ void WaveRecorder::WriteHeader()
 	_stream.write((char*)&size, sizeof(size));
 }
 
+bool WaveRecorder::IsOpen()
+{
+	return _stream.is_open() && _stream.good();
+}
+
 bool WaveRecorder::WriteSamples(int16_t* samples, uint32_t sampleCount, uint32_t sampleRate, bool isStereo)
 {
-	if(_sampleRate != sampleRate || _isStereo != isStereo) {
+	if(!IsOpen() || _sampleRate != sampleRate || _isStereo != isStereo) {
 		//Format changed, stop recording
 		return false;
 	} else {
 		uint32_t sampleBytes = sampleCount * (isStereo ? 4 : 2);
 		_stream.write((char*)samples, sampleBytes);
+		if(!_stream.good()) {
+			return false;
+		}
 		_streamSize += sampleBytes;
 		return true;
 	}

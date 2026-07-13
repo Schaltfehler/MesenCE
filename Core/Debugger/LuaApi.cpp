@@ -23,6 +23,7 @@
 #include "Shared/RewindManager.h"
 #include "Shared/SaveStateManager.h"
 #include "Shared/Emulator.h"
+#include "Shared/Audio/SoundMixer.h"
 #include "Shared/Video/BaseVideoFilter.h"
 #include "Shared/Video/VideoRenderer.h"
 #include "Shared/Video/DrawScreenBufferCommand.h"
@@ -355,6 +356,13 @@ int LuaApi::GetLibrary(lua_State* lua)
 		{ NULL, NULL }
 	};
 
+	static const luaL_Reg audioLib[] = {
+		{ "beginCapture", LuaApi::BeginAudioCapture },
+		{ "getCaptureStatus", LuaApi::GetAudioCaptureStatus },
+		{ "stopCapture", LuaApi::StopAudioCapture },
+		{ NULL, NULL }
+	};
+
 	static const luaL_Reg runtimeLib[] = {
 		{ "getRomInfo", LuaApi::GetRomInfo },
 		{ "getScriptInfo", LuaApi::GetScriptInfo },
@@ -381,6 +389,7 @@ int LuaApi::GetLibrary(lua_State* lua)
 	LuaPushSubLibrary(lua, "state", stateLib);
 	LuaPushSubLibrary(lua, "ui", uiLib);
 	LuaPushSubLibrary(lua, "ppu", ppuLib);
+	LuaPushSubLibrary(lua, "audio", audioLib);
 	LuaPushSubLibrary(lua, "runtime", runtimeLib);
 	LuaPushSubLibrary(lua, "diagnostics", diagnosticsLib);
 
@@ -2272,7 +2281,7 @@ int LuaApi::GetRuntimeCapabilities(lua_State* lua)
 	pushSurface("ppuCheckpoint", snesPpuCheckpointAvailable, snesPpuCheckpointAvailable ? 1 : 0);
 	bool snesPixelProvenanceAvailable = _emu->GetConsoleType() == ConsoleType::Snes;
 	pushSurface("ppuPixelProvenance", snesPixelProvenanceAvailable, snesPixelProvenanceAvailable ? 1 : 0);
-	pushSurface("audioCapture", false, 0);
+	pushSurface("audioCapture", true, 1);
 	lua_settable(lua, -3);
 
 	lua_pushliteral(lua, "cpuTypes");
@@ -2607,6 +2616,93 @@ int LuaApi::GetPixelProvenance(lua_State* lua)
 	}
 	lua_settable(lua, -3);
 	return 1;
+}
+
+static int LuaPushAudioCaptureState(lua_State* lua, const InvestigationAudioCaptureState& state)
+{
+	const char* status = !state.Started ? "not_started" : state.Active ? "capturing" : state.WriteError ? "write_error" : state.LimitReached ? "limit_reached" : "closed";
+	lua_newtable(lua);
+	lua_pushliteral(lua, "contractVersion"); lua_pushinteger(lua, 1); lua_settable(lua, -3);
+	lua_pushliteral(lua, "status"); lua_pushstring(lua, status); lua_settable(lua, -3);
+	lua_pushliteral(lua, "tap"); lua_pushstring(lua, "post_mixer_pre_device"); lua_settable(lua, -3);
+	lua_pushboolvalue(active, state.Active);
+	lua_pushboolvalue(closed, state.Closed);
+	lua_pushboolvalue(overflow, state.Overflow);
+	lua_pushboolvalue(limitReached, state.LimitReached);
+	lua_pushboolvalue(writeError, state.WriteError);
+	lua_pushboolvalue(settingsChanged, state.SettingsChanged);
+	lua_pushintvalue(sampleRate, state.SampleRate);
+	lua_pushintvalue(channels, state.Channels);
+	lua_pushintvalue(bitsPerSample, state.BitsPerSample);
+	lua_pushliteral(lua, "sampleFrameCount"); lua_pushinteger(lua, state.SampleFrameCount); lua_settable(lua, -3);
+	lua_pushliteral(lua, "silentSampleFrameCount"); lua_pushinteger(lua, state.SilentSampleFrameCount); lua_settable(lua, -3);
+	lua_pushliteral(lua, "interleavedSampleCount"); lua_pushinteger(lua, state.SampleFrameCount * state.Channels); lua_settable(lua, -3);
+	lua_pushliteral(lua, "pcmByteCount"); lua_pushinteger(lua, state.SampleFrameCount * state.Channels * (state.BitsPerSample / 8)); lua_settable(lua, -3);
+	lua_pushliteral(lua, "maxSampleFrames"); lua_pushinteger(lua, state.MaxSampleFrames); lua_settable(lua, -3);
+	lua_pushliteral(lua, "path"); lua_pushstring(lua, state.OutputPath.c_str()); lua_settable(lua, -3);
+	lua_pushliteral(lua, "settings");
+	lua_newtable(lua);
+	lua_pushintvalue(effectiveMasterVolume, state.EffectiveMasterVolume);
+	lua_pushboolvalue(equalizerEnabled, state.EqualizerEnabled);
+	lua_pushboolvalue(reverbEnabled, state.ReverbEnabled);
+	lua_pushintvalue(reverbStrength, state.ReverbStrength);
+	lua_pushintvalue(reverbDelay, state.ReverbDelay);
+	lua_pushboolvalue(crossFeedEnabled, state.CrossFeedEnabled);
+	lua_pushintvalue(crossFeedRatio, state.CrossFeedRatio);
+	lua_pushboolvalue(integerFpsMode, state.IntegerFpsMode);
+	lua_pushliteral(lua, "equalizerBandGains");
+	lua_newtable(lua);
+	for(uint8_t i = 0; i < 20; i++) {
+		lua_pushnumber(lua, state.EqualizerBandGains[i]);
+		lua_rawseti(lua, -2, i + 1);
+	}
+	lua_settable(lua, -3);
+	lua_settable(lua, -3);
+	return 1;
+}
+
+int LuaApi::BeginAudioCapture(lua_State* lua)
+{
+	checkinitdone();
+	errorCond(!_emu->GetSettings()->GetDebugConfig().ScriptAllowIoOsAccess, "Audio capture requires Lua I/O access to be enabled");
+	errorCond(lua_gettop(lua) != 1 || !lua_istable(lua, 1), "audio.beginCapture expects one options table");
+	lua_getfield(lua, 1, "path");
+	size_t pathLength = 0;
+	const char* pathValue = luaL_checklstring(lua, -1, &pathLength);
+	errorCond(pathLength == 0, "audio.beginCapture path cannot be empty");
+	errorCond(memchr(pathValue, '\0', pathLength) != nullptr, "audio.beginCapture path contains an embedded null byte");
+	string path(pathValue, pathLength);
+	lua_pop(lua, 1);
+	lua_getfield(lua, 1, "maxSampleFrames");
+	int64_t maxSampleFrames = luaL_checkinteger(lua, -1);
+	lua_pop(lua, 1);
+	errorCond(maxSampleFrames <= 0 || maxSampleFrames > 4000000, "audio.beginCapture maxSampleFrames must be between 1 and 4000000");
+	SoundMixer* mixer = _emu->GetSoundMixer();
+	errorCond(!mixer, "Audio mixer is unavailable");
+	errorCond(mixer->GetInvestigationCaptureState().Active, "audio.beginCapture cannot replace an active capture");
+	errorCond(!mixer->StartInvestigationCapture(path, (uint64_t)maxSampleFrames), "audio.beginCapture could not open the output WAV file");
+	return LuaPushAudioCaptureState(lua, mixer->GetInvestigationCaptureState());
+}
+
+int LuaApi::GetAudioCaptureStatus(lua_State* lua)
+{
+	LuaCallHelper l(lua);
+	checkparams();
+	checkinitdone();
+	SoundMixer* mixer = _emu->GetSoundMixer();
+	errorCond(!mixer, "Audio mixer is unavailable");
+	return LuaPushAudioCaptureState(lua, mixer->GetInvestigationCaptureState());
+}
+
+int LuaApi::StopAudioCapture(lua_State* lua)
+{
+	LuaCallHelper l(lua);
+	checkparams();
+	checkinitdone();
+	SoundMixer* mixer = _emu->GetSoundMixer();
+	errorCond(!mixer, "Audio mixer is unavailable");
+	mixer->StopInvestigationCapture();
+	return LuaPushAudioCaptureState(lua, mixer->GetInvestigationCaptureState());
 }
 
 int LuaApi::GetLogWindowLog(lua_State* lua)

@@ -93,6 +93,9 @@ public:
 	static int GetPpuCheckpoint(lua_State* lua);
 	static int BeginPixelProvenance(lua_State* lua);
 	static int GetPixelProvenance(lua_State* lua);
+	static int BeginAudioCapture(lua_State* lua);
+	static int GetAudioCaptureStatus(lua_State* lua);
+	static int StopAudioCapture(lua_State* lua);
 	static int GetLogWindowLog(lua_State* lua);
 
 	static void GenerateStateTable(Serializer& s, lua_State* lua);

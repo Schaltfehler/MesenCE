@@ -558,6 +558,30 @@
 	"returnValue": { "type": "Table", "description": "Versioned bounded pixel provenance capture with status, bounds, overflow, and rows" }
 },
 {
+	"name": "beginAudioCapture",
+	"category": "Miscellaneous",
+	"subcategory": "Debugger",
+	"description": "Starts a bounded stereo PCM WAV capture at the post_mixer_pre_device tap. The tap is after resampling, configured mixer filters, and master volume, but before rewind buffering, speed-adjusted host playback, and the host audio device. maxSampleFrames is capped at 4,000,000. Lua I/O access is required. Available as emu.audio.beginCapture.",
+	"parameters": [
+		{ "name": "options", "type": "Table", "description": "{ path = string, maxSampleFrames = int }" }
+	],
+	"returnValue": { "type": "Table", "description": "Versioned capture state with format, bounds, sample counts, applied mixer settings, settingsChanged, and close status" }
+},
+{
+	"name": "getAudioCaptureStatus",
+	"category": "Miscellaneous",
+	"subcategory": "Debugger",
+	"description": "Returns the current bounded PCM capture state without stopping it. Call from frame callbacks to pair exact sample offsets with emulator frame/master-clock/CPU-cycle facts. Available as emu.audio.getCaptureStatus.",
+	"returnValue": { "type": "Table", "description": "{ contractVersion = 1, tap = 'post_mixer_pre_device', status, sampleRate, channels, bitsPerSample, sampleFrameCount, silentSampleFrameCount, pcmByteCount, maxSampleFrames, overflow, limitReached, writeError, settingsChanged, settings, path }" }
+},
+{
+	"name": "stopAudioCapture",
+	"category": "Miscellaneous",
+	"subcategory": "Debugger",
+	"description": "Closes the bounded PCM WAV capture and returns its final state. Available as emu.audio.stopCapture.",
+	"returnValue": { "type": "Table", "description": "Final versioned capture state" }
+},
+{
 	"name": "getScreenBuffer",
 	"category": "Drawing",
 	"description": "Returns an array of ARGB values with the contents of the console's screen - can be used with emu.setScreenBuffer() to modify the screen's contents.\n\nNote: The size of the array varies based on the console, game, and sometimes scene. Use emu.getScreenSize() to get the screen's current dimensions.",
