@@ -46,7 +46,7 @@ public:
 			case MemoryOperationType::PpuRenderingRead:
 			case MemoryOperationType::DummyRead:
 				for(unique_ptr<ScriptHost>& script : _scripts) {
-					script->CallMemoryCallback(relAddr, value, CallbackType::Read, cpuType);
+					script->CallMemoryCallback(relAddr, value, CallbackType::Read, cpuType, type);
 				}
 				break;
 
@@ -54,7 +54,7 @@ public:
 			case MemoryOperationType::DummyWrite:
 			case MemoryOperationType::DmaWrite:
 				for(unique_ptr<ScriptHost>& script : _scripts) {
-					script->CallMemoryCallback(relAddr, value, CallbackType::Write, cpuType);
+					script->CallMemoryCallback(relAddr, value, CallbackType::Write, cpuType, type);
 				}
 				break;
 
@@ -62,7 +62,7 @@ public:
 			case MemoryOperationType::ExecOperand:
 				if(processExec) {
 					for(unique_ptr<ScriptHost>& script : _scripts) {
-						script->CallMemoryCallback(relAddr, value, CallbackType::Exec, cpuType);
+						script->CallMemoryCallback(relAddr, value, CallbackType::Exec, cpuType, type);
 					}
 				}
 				break;

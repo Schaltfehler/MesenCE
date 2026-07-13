@@ -5,6 +5,7 @@
 #include "Lua/luasocket.hpp"
 #include "Debugger/ScriptingContext.h"
 #include "Debugger/LuaApi.h"
+#include "Debugger/IDebugger.h"
 #include "Debugger/LuaCallHelper.h"
 #include "Debugger/DebugTypes.h"
 #include "Debugger/Debugger.h"
@@ -12,6 +13,8 @@
 #include "Shared/Emulator.h"
 #include "Shared/EmuSettings.h"
 #include "Shared/EventType.h"
+#include "Shared/MemoryOperationType.h"
+#include "SNES/SpcTypes.h"
 #include "Shared/SaveStateManager.h"
 #include "Utilities/magic_enum.hpp"
 #include "Utilities/StringUtilities.h"
@@ -267,10 +270,10 @@ bool ScriptingContext::IsNetworkAccessAllowed()
 }
 
 template<typename T>
-void ScriptingContext::CallMemoryCallback(AddressInfo relAddr, T& value, CallbackType type, CpuType cpuType)
+void ScriptingContext::CallMemoryCallback(AddressInfo relAddr, T& value, CallbackType type, CpuType cpuType, MemoryOperationType operationType)
 {
 	_allowSaveState = type == CallbackType::Exec && cpuType == _defaultCpuType;
-	InternalCallMemoryCallback(relAddr, value, type, cpuType);
+	InternalCallMemoryCallback(relAddr, value, type, cpuType, operationType);
 	_allowSaveState = false;
 }
 
@@ -362,7 +365,7 @@ bool ScriptingContext::IsAddressMatch(MemoryCallback& callback, AddressInfo addr
 }
 
 template<typename T>
-void ScriptingContext::InternalCallMemoryCallback(AddressInfo relAddr, T& value, CallbackType type, CpuType cpuType)
+void ScriptingContext::InternalCallMemoryCallback(AddressInfo relAddr, T& value, CallbackType type, CpuType cpuType, MemoryOperationType operationType)
 {
 	if(_callbacks[(int)type].empty()) {
 		return;
@@ -396,21 +399,123 @@ void ScriptingContext::InternalCallMemoryCallback(AddressInfo relAddr, T& value,
 		lua_rawgeti(_lua, LUA_REGISTRYINDEX, callback.Reference);
 		if(callback.UseTablePayload) {
 			lua_newtable(_lua);
-			lua_pushliteral(_lua, "address"); lua_pushinteger(_lua, relAddr.Address); lua_settable(_lua, -3);
-			lua_pushliteral(_lua, "value"); lua_pushinteger(_lua, value); lua_settable(_lua, -3);
-			lua_pushliteral(_lua, "callbackType"); lua_pushinteger(_lua, (int)type); lua_settable(_lua, -3);
-			lua_pushliteral(_lua, "memoryType"); lua_pushinteger(_lua, (int)callback.MemType); lua_settable(_lua, -3);
-			lua_pushliteral(_lua, "cpuType"); lua_pushinteger(_lua, (int)cpuType); lua_settable(_lua, -3);
-			lua_pushliteral(_lua, "startAddress"); lua_pushinteger(_lua, callback.StartAddress); lua_settable(_lua, -3);
-			lua_pushliteral(_lua, "endAddress"); lua_pushinteger(_lua, callback.EndAddress); lua_settable(_lua, -3);
-			lua_pushliteral(_lua, "canReplaceValue"); lua_pushboolean(_lua, 1); lua_settable(_lua, -3);
+			lua_pushliteral(_lua, "address");
+			lua_pushinteger(_lua, relAddr.Address);
+			lua_settable(_lua, -3);
+			lua_pushliteral(_lua, "value");
+			lua_pushinteger(_lua, value);
+			lua_settable(_lua, -3);
+			lua_pushliteral(_lua, "callbackType");
+			lua_pushinteger(_lua, (int)type);
+			lua_settable(_lua, -3);
+			lua_pushliteral(_lua, "memoryType");
+			lua_pushinteger(_lua, (int)callback.MemType);
+			lua_settable(_lua, -3);
+			lua_pushliteral(_lua, "cpuType");
+			lua_pushinteger(_lua, (int)cpuType);
+			lua_settable(_lua, -3);
+			lua_pushliteral(_lua, "startAddress");
+			lua_pushinteger(_lua, callback.StartAddress);
+			lua_settable(_lua, -3);
+			lua_pushliteral(_lua, "endAddress");
+			lua_pushinteger(_lua, callback.EndAddress);
+			lua_settable(_lua, -3);
+			lua_pushliteral(_lua, "canReplaceValue");
+			lua_pushboolean(_lua, 1);
+			lua_settable(_lua, -3);
+			lua_pushliteral(_lua, "accessOrigin");
+			lua_pushliteral(_lua, "emulated_memory_operation");
+			lua_settable(_lua, -3);
+			lua_pushliteral(_lua, "operationType");
+			lua_pushinteger(_lua, (int)operationType);
+			lua_settable(_lua, -3);
+			lua_pushliteral(_lua, "operationTypeName");
+			lua_pushstring(_lua, string(magic_enum::enum_name<MemoryOperationType>(operationType)).c_str());
+			lua_settable(_lua, -3);
+
+			IDebugger* cpuDebugger = _debugger->GetCpuDebugger(cpuType);
+			CpuInstructionContext instruction = {};
+			if(cpuDebugger && cpuDebugger->GetInstructionContext(instruction)) {
+				lua_pushliteral(_lua, "instructionContext");
+				lua_newtable(_lua);
+				lua_pushliteral(_lua, "instructionAddress");
+				lua_pushinteger(_lua, instruction.Address);
+				lua_settable(_lua, -3);
+				lua_pushliteral(_lua, "startCycle");
+				lua_pushinteger(_lua, instruction.StartCycle);
+				lua_settable(_lua, -3);
+				lua_pushliteral(_lua, "opcode");
+				lua_pushinteger(_lua, instruction.OpCode);
+				lua_settable(_lua, -3);
+				lua_pushliteral(_lua, "bytes");
+				lua_newtable(_lua);
+				for(uint8_t i = 0; i < instruction.ByteCount; i++) {
+					lua_pushinteger(_lua, instruction.ByteCode[i]);
+					lua_rawseti(_lua, -2, i + 1);
+				}
+				lua_settable(_lua, -3);
+				lua_pushliteral(_lua, "joinKey");
+				string joinKey = std::to_string((int)cpuType) + ":" + std::to_string(instruction.StartCycle) + ":" + std::to_string(instruction.Address);
+				lua_pushstring(_lua, joinKey.c_str());
+				lua_settable(_lua, -3);
+
+				const BaseState* instructionState = cpuDebugger->GetInstructionStartState();
+				if(cpuType == CpuType::Spc && instructionState) {
+					const SpcState* state = static_cast<const SpcState*>(instructionState);
+					lua_pushliteral(_lua, "preInstructionState");
+					lua_newtable(_lua);
+					lua_pushliteral(_lua, "pc");
+					lua_pushinteger(_lua, state->PC);
+					lua_settable(_lua, -3);
+					lua_pushliteral(_lua, "a");
+					lua_pushinteger(_lua, state->A);
+					lua_settable(_lua, -3);
+					lua_pushliteral(_lua, "x");
+					lua_pushinteger(_lua, state->X);
+					lua_settable(_lua, -3);
+					lua_pushliteral(_lua, "y");
+					lua_pushinteger(_lua, state->Y);
+					lua_settable(_lua, -3);
+					lua_pushliteral(_lua, "sp");
+					lua_pushinteger(_lua, state->SP);
+					lua_settable(_lua, -3);
+					lua_pushliteral(_lua, "ps");
+					lua_pushinteger(_lua, state->PS);
+					lua_settable(_lua, -3);
+					lua_pushliteral(_lua, "directPageBase");
+					lua_pushinteger(_lua, (state->PS & SpcFlags::DirectPage) ? 0x100 : 0);
+					lua_settable(_lua, -3);
+					lua_pushliteral(_lua, "cycle");
+					lua_pushinteger(_lua, state->Cycle);
+					lua_settable(_lua, -3);
+					lua_settable(_lua, -3);
+				}
+				lua_settable(_lua, -3);
+			}
+
+			lua_pushliteral(_lua, "effectiveAddress");
+			lua_newtable(_lua);
+			lua_pushliteral(_lua, "address");
+			lua_pushinteger(_lua, relAddr.Address);
+			lua_settable(_lua, -3);
+			lua_pushliteral(_lua, "memoryType");
+			lua_pushinteger(_lua, (int)relAddr.Type);
+			lua_settable(_lua, -3);
+			lua_pushliteral(_lua, "provenance");
+			lua_pushliteral(_lua, "emulator_memory_operation");
+			lua_settable(_lua, -3);
+			lua_settable(_lua, -3);
 
 			AddressInfo absoluteAddress = _debugger->GetAbsoluteAddress(relAddr);
 			if(absoluteAddress.Address >= 0) {
 				lua_pushliteral(_lua, "absoluteAddress");
 				lua_newtable(_lua);
-				lua_pushliteral(_lua, "address"); lua_pushinteger(_lua, absoluteAddress.Address); lua_settable(_lua, -3);
-				lua_pushliteral(_lua, "memoryType"); lua_pushinteger(_lua, (int)absoluteAddress.Type); lua_settable(_lua, -3);
+				lua_pushliteral(_lua, "address");
+				lua_pushinteger(_lua, absoluteAddress.Address);
+				lua_settable(_lua, -3);
+				lua_pushliteral(_lua, "memoryType");
+				lua_pushinteger(_lua, (int)absoluteAddress.Type);
+				lua_settable(_lua, -3);
 				lua_settable(_lua, -3);
 			}
 		} else {
@@ -445,8 +550,12 @@ int ScriptingContext::CallEventCallback(EventType type, CpuType cpuType)
 		lua_rawgeti(_lua, LUA_REGISTRYINDEX, callback.Reference);
 		if(callback.UseTablePayload) {
 			lua_newtable(_lua);
-			lua_pushliteral(_lua, "eventType"); lua_pushinteger(_lua, (int)type); lua_settable(_lua, -3);
-			lua_pushliteral(_lua, "cpuType"); lua_pushinteger(_lua, (int)cpuType); lua_settable(_lua, -3);
+			lua_pushliteral(_lua, "eventType");
+			lua_pushinteger(_lua, (int)type);
+			lua_settable(_lua, -3);
+			lua_pushliteral(_lua, "cpuType");
+			lua_pushinteger(_lua, (int)cpuType);
+			lua_settable(_lua, -3);
 		} else {
 			lua_pushinteger(_lua, (int)cpuType);
 		}
@@ -457,6 +566,6 @@ int ScriptingContext::CallEventCallback(EventType type, CpuType cpuType)
 	return l.ReturnCount();
 }
 
-template void ScriptingContext::CallMemoryCallback<uint8_t>(AddressInfo relAddr, uint8_t& value, CallbackType type, CpuType cpuType);
-template void ScriptingContext::CallMemoryCallback<uint16_t>(AddressInfo relAddr, uint16_t& value, CallbackType type, CpuType cpuType);
-template void ScriptingContext::CallMemoryCallback<uint32_t>(AddressInfo relAddr, uint32_t& value, CallbackType type, CpuType cpuType);
+template void ScriptingContext::CallMemoryCallback<uint8_t>(AddressInfo relAddr, uint8_t& value, CallbackType type, CpuType cpuType, MemoryOperationType operationType);
+template void ScriptingContext::CallMemoryCallback<uint16_t>(AddressInfo relAddr, uint16_t& value, CallbackType type, CpuType cpuType, MemoryOperationType operationType);
+template void ScriptingContext::CallMemoryCallback<uint32_t>(AddressInfo relAddr, uint32_t& value, CallbackType type, CpuType cpuType, MemoryOperationType operationType);

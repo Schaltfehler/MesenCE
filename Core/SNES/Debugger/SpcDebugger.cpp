@@ -41,6 +41,8 @@ void SpcDebugger::Reset()
 {
 	_callstackManager->Clear();
 	_prevOpCode = 0xFF;
+	_instructionStartState = {};
+	_instructionContext = {};
 }
 
 void SpcDebugger::ProcessConfigChange()
@@ -53,8 +55,21 @@ void SpcDebugger::ProcessConfigChange()
 void SpcDebugger::ProcessInstruction()
 {
 	SpcState& state = _spc->GetState();
+	_instructionStartState = state;
 	uint16_t addr = state.PC;
 	uint8_t value = _spc->DebugRead(addr);
+
+	_instructionContext = {};
+	_instructionContext.StartCycle = state.Cycle;
+	_instructionContext.Address = addr;
+	_instructionContext.OpCode = value;
+	_instructionContext.ByteCount = std::min<uint8_t>(SpcDisUtils::GetOpSize(value), sizeof(_instructionContext.ByteCode));
+	_instructionContext.ByteCode[0] = value;
+	for(uint8_t i = 1; i < _instructionContext.ByteCount; i++) {
+		_instructionContext.ByteCode[i] = _spc->DebugRead((uint16_t)(addr + i));
+	}
+
+	InstructionProgress.LastOpCode = value;
 	AddressInfo addressInfo = _spc->GetAbsoluteAddress(addr);
 	MemoryOperationInfo operation(addr, value, MemoryOperationType::ExecOpCode, MemoryType::SpcMemory);
 	InstructionProgress.LastMemOperation = operation;
@@ -262,6 +277,15 @@ IAssembler* SpcDebugger::GetAssembler()
 BaseEventManager* SpcDebugger::GetEventManager()
 {
 	return nullptr;
+}
+
+bool SpcDebugger::GetInstructionContext(CpuInstructionContext& context)
+{
+	if(_instructionContext.ByteCount == 0) {
+		return false;
+	}
+	context = _instructionContext;
+	return true;
 }
 
 BaseState& SpcDebugger::GetState()

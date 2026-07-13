@@ -2,6 +2,7 @@
 #include "pch.h"
 #include "Debugger/DebugTypes.h"
 #include "Debugger/IDebugger.h"
+#include "SNES/SpcTypes.h"
 
 class Disassembler;
 class Debugger;
@@ -33,6 +34,8 @@ class SpcDebugger final : public IDebugger
 	uint8_t _prevOpCode = 0xFF;
 	uint8_t _prevStackPointer = 0;
 	uint32_t _prevProgramCounter = 0;
+	SpcState _instructionStartState = {};
+	CpuInstructionContext _instructionContext = {};
 
 	bool _debuggerEnabled = false;
 	bool _predictiveBreakpoints = false;
@@ -67,6 +70,8 @@ public:
 	BaseEventManager* GetEventManager() override;
 	ITraceLogger* GetTraceLogger() override;
 	ISerializable* GetSerializableCpu() override;
+	const BaseState* GetInstructionStartState() override { return &_instructionStartState; }
+	bool GetInstructionContext(CpuInstructionContext& context) override;
 
 	BaseState& GetState() override;
 };

@@ -26,8 +26,8 @@ public:
 	void ProcessEvent(EventType eventType, CpuType cpuType);
 
 	template<typename T>
-	__forceinline void CallMemoryCallback(AddressInfo relAddr, T& value, CallbackType callbackType, CpuType cpuType)
+	__forceinline void CallMemoryCallback(AddressInfo relAddr, T& value, CallbackType callbackType, CpuType cpuType, MemoryOperationType operationType)
 	{
-		_context->CallMemoryCallback(relAddr, value, callbackType, cpuType);
+		_context->CallMemoryCallback(relAddr, value, callbackType, cpuType, operationType);
 	}
 };

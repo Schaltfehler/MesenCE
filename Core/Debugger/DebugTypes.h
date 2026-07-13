@@ -524,6 +524,15 @@ struct CpuInstructionProgress
 	MemoryOperationInfo LastMemOperation = {};
 };
 
+struct CpuInstructionContext
+{
+	uint64_t StartCycle = 0;
+	uint32_t Address = 0;
+	uint8_t OpCode = 0;
+	uint8_t ByteCode[4] = {};
+	uint8_t ByteCount = 0;
+};
+
 struct DebugControllerState
 {
 	bool A;
