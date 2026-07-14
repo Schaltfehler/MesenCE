@@ -270,10 +270,10 @@ bool ScriptingContext::IsNetworkAccessAllowed()
 }
 
 template<typename T>
-void ScriptingContext::CallMemoryCallback(AddressInfo relAddr, T& value, CallbackType type, CpuType cpuType, MemoryOperationType operationType)
+void ScriptingContext::CallMemoryCallback(AddressInfo relAddr, T& value, CallbackType type, CpuType cpuType, MemoryOperationType operationType, bool instructionAccess)
 {
 	_allowSaveState = type == CallbackType::Exec && cpuType == _defaultCpuType;
-	InternalCallMemoryCallback(relAddr, value, type, cpuType, operationType);
+	InternalCallMemoryCallback(relAddr, value, type, cpuType, operationType, instructionAccess);
 	_allowSaveState = false;
 }
 
@@ -365,7 +365,7 @@ bool ScriptingContext::IsAddressMatch(MemoryCallback& callback, AddressInfo addr
 }
 
 template<typename T>
-void ScriptingContext::InternalCallMemoryCallback(AddressInfo relAddr, T& value, CallbackType type, CpuType cpuType, MemoryOperationType operationType)
+void ScriptingContext::InternalCallMemoryCallback(AddressInfo relAddr, T& value, CallbackType type, CpuType cpuType, MemoryOperationType operationType, bool instructionAccess)
 {
 	if(_callbacks[(int)type].empty()) {
 		return;
@@ -424,7 +424,7 @@ void ScriptingContext::InternalCallMemoryCallback(AddressInfo relAddr, T& value,
 			lua_pushboolean(_lua, 1);
 			lua_settable(_lua, -3);
 			lua_pushliteral(_lua, "accessOrigin");
-			lua_pushliteral(_lua, "emulated_memory_operation");
+			lua_pushstring(_lua, instructionAccess ? "emulated_memory_operation" : "spc_dsp_memory_operation");
 			lua_settable(_lua, -3);
 			lua_pushliteral(_lua, "operationType");
 			lua_pushinteger(_lua, (int)operationType);
@@ -435,7 +435,7 @@ void ScriptingContext::InternalCallMemoryCallback(AddressInfo relAddr, T& value,
 
 			IDebugger* cpuDebugger = _debugger->GetCpuDebugger(cpuType);
 			CpuInstructionContext instruction = {};
-			if(cpuDebugger && cpuDebugger->GetInstructionContext(instruction)) {
+			if(instructionAccess && cpuDebugger && cpuDebugger->GetInstructionContext(instruction)) {
 				lua_pushliteral(_lua, "instructionContext");
 				lua_newtable(_lua);
 				lua_pushliteral(_lua, "instructionAddress");
@@ -566,6 +566,6 @@ int ScriptingContext::CallEventCallback(EventType type, CpuType cpuType)
 	return l.ReturnCount();
 }
 
-template void ScriptingContext::CallMemoryCallback<uint8_t>(AddressInfo relAddr, uint8_t& value, CallbackType type, CpuType cpuType, MemoryOperationType operationType);
-template void ScriptingContext::CallMemoryCallback<uint16_t>(AddressInfo relAddr, uint16_t& value, CallbackType type, CpuType cpuType, MemoryOperationType operationType);
-template void ScriptingContext::CallMemoryCallback<uint32_t>(AddressInfo relAddr, uint32_t& value, CallbackType type, CpuType cpuType, MemoryOperationType operationType);
+template void ScriptingContext::CallMemoryCallback<uint8_t>(AddressInfo relAddr, uint8_t& value, CallbackType type, CpuType cpuType, MemoryOperationType operationType, bool instructionAccess);
+template void ScriptingContext::CallMemoryCallback<uint16_t>(AddressInfo relAddr, uint16_t& value, CallbackType type, CpuType cpuType, MemoryOperationType operationType, bool instructionAccess);
+template void ScriptingContext::CallMemoryCallback<uint32_t>(AddressInfo relAddr, uint32_t& value, CallbackType type, CpuType cpuType, MemoryOperationType operationType, bool instructionAccess);

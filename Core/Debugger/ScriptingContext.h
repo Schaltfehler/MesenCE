@@ -71,7 +71,7 @@ protected:
 	vector<MemoryCallback> _callbacks[3];
 	vector<EventCallback> _eventCallbacks[(int)EventType::LastValue + 1];
 
-	template<typename T> void InternalCallMemoryCallback(AddressInfo relAddr, T& value, CallbackType type, CpuType cpuType, MemoryOperationType operationType);
+	template<typename T> void InternalCallMemoryCallback(AddressInfo relAddr, T& value, CallbackType type, CpuType cpuType, MemoryOperationType operationType, bool instructionAccess);
 
 	bool IsAddressMatch(MemoryCallback& callback, AddressInfo addr);
 
@@ -92,7 +92,7 @@ public:
 	bool IsIoOsAccessAllowed();
 	bool IsNetworkAccessAllowed();
 
-	template<typename T> void CallMemoryCallback(AddressInfo relAddr, T& value, CallbackType type, CpuType cpuType, MemoryOperationType operationType);
+	template<typename T> void CallMemoryCallback(AddressInfo relAddr, T& value, CallbackType type, CpuType cpuType, MemoryOperationType operationType, bool instructionAccess = true);
 	int CallEventCallback(EventType type, CpuType cpuType);
 	bool CheckInitDone();
 	bool IsSaveStateAllowed();

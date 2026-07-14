@@ -282,7 +282,7 @@ void Debugger::ProcessMemoryRead(uint32_t addr, T& value, MemoryOperationType op
 	}
 
 	if(_scriptManager->HasCpuMemoryCallbacks()) {
-		ProcessScripts<type>(addr, value, opType);
+		ProcessScripts<type>(addr, value, opType, flags == MemoryAccessFlags::None);
 	}
 }
 
@@ -315,7 +315,7 @@ bool Debugger::ProcessMemoryWrite(uint32_t addr, T& value, MemoryOperationType o
 	}
 
 	if(_scriptManager->HasCpuMemoryCallbacks()) {
-		ProcessScripts<type>(addr, value, opType);
+		ProcessScripts<type>(addr, value, opType, flags == MemoryAccessFlags::None);
 	}
 
 	return !_debuggers[(int)type].Debugger->GetFrozenAddressManager().IsFrozenAddress(addr);
@@ -631,11 +631,11 @@ void Debugger::ProcessEvent(EventType type, std::optional<CpuType> cpuTypeOpt)
 }
 
 template<CpuType type, typename T>
-void Debugger::ProcessScripts(uint32_t addr, T& value, MemoryOperationType opType)
+void Debugger::ProcessScripts(uint32_t addr, T& value, MemoryOperationType opType, bool instructionAccess)
 {
 	MemoryOperationInfo memOp = GetDebugger<type, IDebugger>()->InstructionProgress.LastMemOperation;
 	AddressInfo relAddr = { (int32_t)memOp.Address, memOp.MemType };
-	_scriptManager->ProcessMemoryOperation(relAddr, value, opType, type, false);
+	_scriptManager->ProcessMemoryOperation(relAddr, value, opType, type, false, instructionAccess);
 }
 
 template<CpuType type, typename T>

@@ -38,7 +38,7 @@ public:
 	bool HasPpuMemoryCallbacks() { return _scripts.size() && _isPpuMemoryCallbackEnabled; }
 
 	template<typename T>
-	__forceinline void ProcessMemoryOperation(AddressInfo relAddr, T& value, MemoryOperationType type, CpuType cpuType, bool processExec)
+	__forceinline void ProcessMemoryOperation(AddressInfo relAddr, T& value, MemoryOperationType type, CpuType cpuType, bool processExec, bool instructionAccess = true)
 	{
 		switch(type) {
 			case MemoryOperationType::Read:
@@ -46,7 +46,7 @@ public:
 			case MemoryOperationType::PpuRenderingRead:
 			case MemoryOperationType::DummyRead:
 				for(unique_ptr<ScriptHost>& script : _scripts) {
-					script->CallMemoryCallback(relAddr, value, CallbackType::Read, cpuType, type);
+					script->CallMemoryCallback(relAddr, value, CallbackType::Read, cpuType, type, instructionAccess);
 				}
 				break;
 
@@ -54,7 +54,7 @@ public:
 			case MemoryOperationType::DummyWrite:
 			case MemoryOperationType::DmaWrite:
 				for(unique_ptr<ScriptHost>& script : _scripts) {
-					script->CallMemoryCallback(relAddr, value, CallbackType::Write, cpuType, type);
+					script->CallMemoryCallback(relAddr, value, CallbackType::Write, cpuType, type, instructionAccess);
 				}
 				break;
 
@@ -62,7 +62,7 @@ public:
 			case MemoryOperationType::ExecOperand:
 				if(processExec) {
 					for(unique_ptr<ScriptHost>& script : _scripts) {
-						script->CallMemoryCallback(relAddr, value, CallbackType::Exec, cpuType, type);
+						script->CallMemoryCallback(relAddr, value, CallbackType::Exec, cpuType, type, instructionAccess);
 					}
 				}
 				break;

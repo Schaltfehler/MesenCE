@@ -93,7 +93,7 @@ private:
 
 	template<CpuType type, typename DebuggerType> DebuggerType* GetDebugger();
 	template<CpuType type> uint64_t GetCpuCycleCount();
-	template<CpuType type, typename T> void ProcessScripts(uint32_t addr, T& value, MemoryOperationType opType);
+	template<CpuType type, typename T> void ProcessScripts(uint32_t addr, T& value, MemoryOperationType opType, bool instructionAccess = true);
 	template<CpuType type, typename T> void ProcessScripts(uint32_t addr, T& value, MemoryType memType, MemoryOperationType opType);
 
 	bool IsDebugWindowOpened(CpuType cpuType);

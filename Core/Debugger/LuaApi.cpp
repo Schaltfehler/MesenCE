@@ -2276,7 +2276,7 @@ int LuaApi::GetRuntimeCapabilities(lua_State* lua)
 		lua_settable(lua, -3);
 		lua_settable(lua, -3);
 	};
-	pushSurface("memoryCallbackPayload", true, 2);
+	pushSurface("memoryCallbackPayload", true, 3);
 	bool snesPpuCheckpointAvailable = _emu->GetConsoleType() == ConsoleType::Snes;
 	pushSurface("ppuCheckpoint", snesPpuCheckpointAvailable, snesPpuCheckpointAvailable ? 1 : 0);
 	bool snesPixelProvenanceAvailable = _emu->GetConsoleType() == ConsoleType::Snes;
