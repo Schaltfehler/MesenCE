@@ -39,6 +39,22 @@
 #include "Utilities/CRC32.h"
 #include "Shared/MemoryOperationType.h"
 
+namespace
+{
+	const char* GetSnesMemoryTypeName(MemoryType type)
+	{
+		switch(type) {
+			case MemoryType::SnesWorkRam: return "SnesWorkRam";
+			case MemoryType::SnesVideoRam: return "SnesVideoRam";
+			case MemoryType::SnesSpriteRam: return "SnesSpriteRam";
+			case MemoryType::SnesCgRam: return "SnesCgRam";
+			case MemoryType::SnesSaveRam: return "SnesSaveRam";
+			case MemoryType::SnesRegister: return "SnesRegister";
+			default: return "Other";
+		}
+	}
+}
+
 SnesDebugger::SnesDebugger(Debugger* debugger, CpuType cpuType) : IDebugger(debugger->GetEmulator())
 {
 	_cpuType = cpuType;
@@ -263,8 +279,16 @@ void SnesDebugger::ProcessRead(uint32_t addr, uint8_t value, MemoryOperationType
 		if(result != ReadResult::Normal) {
 			//Memory access was a read on an uninitialized memory address
 			if(result == ReadResult::FirstUninitRead) {
-				//Only warn the first time
-				_debugger->Log(string(_cpuType == CpuType::Sa1 ? "[SA1]" : "[CPU]") + " Uninitialized memory read: $" + HexUtilities::ToHex24(addr));
+				//Only warn the first time. Include debugger attribution so callers can
+				//separate loaded-state counter noise from intervention deltas.
+				string details = " (memory=" + string(GetSnesMemoryTypeName(addressInfo.Type)) +
+					", offset=$" + HexUtilities::ToHex24(addressInfo.Address);
+				if(type == MemoryOperationType::DmaRead) {
+					details += ", source=dma)";
+				} else {
+					details += ", source=cpu, pc=$" + HexUtilities::ToHex24(_prevProgramCounter) + ")";
+				}
+				_debugger->Log(string(_cpuType == CpuType::Sa1 ? "[SA1]" : "[CPU]") + " Uninitialized memory read: $" + HexUtilities::ToHex24(addr) + details);
 			}
 			if(_debuggerEnabled && _settings->GetDebugConfig().BreakOnUninitRead) {
 				_step->Break(BreakSource::BreakOnUninitMemoryRead);
